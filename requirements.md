@@ -168,6 +168,6 @@ Ingredient Checker is an Android mobile application proposed to help users make 
 ## 8. Additional Considerations
 
 - Consider consultations so that classification rules remain up-to-date with food regulations and dietary guidelines.  
-- Application must strict adherence to data privacy laws (KVKK) must be verified; disclaimers may be needed regarding the accuracy of the classifications.
-- Since AWS Lambda and related services handle the core functionality, a dedicated backend is not really necessary. The Android app can communicate directly with AWS services.  
+- Application must strictly adherence to data privacy laws (KVKK); disclaimers may be needed regarding the accuracy of the classifications.
+- Since AWS Lambda and related services handle the core functionality, a dedicated backend is not really necessary. The Android app can communicate directly with AWS services.
 - Primary OCR/NLP tasks are expected to run in the cloud for better accuracy and performance, but a basic local fallback should be addressed for use-case contingencies (e.g., privacy, poor reception).
