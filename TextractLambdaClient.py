@@ -10,8 +10,9 @@ DEFAULTS = {
     'function_name': 'image_pipeline_fn'
 }
 
-class TextractLambdaInvoker:
+class TextractLambdaClient:
     def __init__(self, profile_name: str, function_name: str):
+        # Environment variables (they're in the project directory)
         os.environ['AWS_SHARED_CREDENTIALS_FILE'] = './.aws/credentials'
         os.environ['AWS_CONFIG_FILE'] = './.aws/config'
 
@@ -61,7 +62,7 @@ def main():
     args = parser.parse_args()
 
     try:
-        invoker = TextractLambdaInvoker(profile_name=args.profile, function_name=args.function)
+        invoker = TextractLambdaClient(profile_name=args.profile, function_name=args.function)
         result = invoker.invoke(args.image_path)
 
         print("Extracted text:")

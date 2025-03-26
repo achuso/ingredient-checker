@@ -5,7 +5,7 @@ import json
 
 BUCKET_NAME = 'img-storage-s3-479'
 
-class TextractLambdaHandler:
+class TextractLambdaProcessor:
     def __init__(self, bucket_name):
         self.s3 = boto3.client('s3')
         self.textract = boto3.client('textract')
@@ -35,7 +35,7 @@ def lambda_handler(event, context):
                 "body": json.dumps({"error": "No image provided."})
             }
 
-        processor = TextractLambdaHandler(BUCKET_NAME)
+        processor = TextractLambdaProcessor(BUCKET_NAME)
         s3_key = processor.save_image_to_s3(image_b64)
         extracted_text = processor.extract_text(s3_key)
 
