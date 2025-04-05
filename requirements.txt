@@ -1,0 +1,6 @@
+fastapi
+mangum
+pydantic
+boto3
+filetype
+Pillow
