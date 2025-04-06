@@ -1,42 +1,68 @@
+from PIL import Image, ImageEnhance, ImageFilter
+import io
 import boto3
 import base64
 import uuid
-import filetype
 import os
+import functools
+import logging
 
-BUCKET_NAME = os.getenv("BUCKET_NAME", "img-storage-s3-479")
+from fastapi.concurrency import run_in_threadpool
+
+BUCKET_NAME = "img-storage-s3-479"
+logger = logging.getLogger(__name__)
+
+@functools.lru_cache(maxsize=1)
+def get_s3_client():
+    return boto3.client("s3")
+
+@functools.lru_cache(maxsize=1)
+def get_textract_client():
+    return boto3.client("textract")
+
 
 class TextractProcessor:
     def __init__(self, bucket_name=BUCKET_NAME):
-        self.s3 = boto3.client('s3')
-        self.textract = boto3.client('textract')
+        self.s3 = get_s3_client()
+        self.textract = get_textract_client()
         self.bucket = bucket_name
+
+    def _preprocess_image(self, image_data: bytes) -> bytes:
+        """Preprocess the image for Textract OCR."""
+        img = Image.open(io.BytesIO(image_data)).convert("RGB")
+        img.thumbnail((1000, 1000))
+        gray = img.convert("L")
+        contrast = ImageEnhance.Contrast(gray).enhance(2.5)
+        sharp = contrast.filter(ImageFilter.SHARPEN)
+        thresholded = sharp.point(lambda p: 255 if p > 180 else 0)
+        final = thresholded.convert("RGB")
+        output = io.BytesIO()
+        final.save(output, format="JPEG", quality=65, optimize=True)
+        return output.getvalue()
 
     def save_image_to_s3(self, image_b64: str) -> str:
         image_data = base64.b64decode(image_b64)
+        compressed_data = self._preprocess_image(image_data)
         image_id = str(uuid.uuid4())
-
-        # ✅ Use filetype instead of imghdr (Python 3.13 compatible)
-        kind = filetype.guess(image_data)
-        file_ext = kind.extension if kind else "png"
-
-        image_key = f"uploads/{image_id}.{file_ext}"
-
+        image_key = f"uploads/{image_id}.jpg"
         self.s3.put_object(
             Bucket=self.bucket,
             Key=image_key,
-            Body=image_data,
-            ContentType=f'image/{file_ext}'
+            Body=compressed_data,
+            ContentType='image/jpeg'
         )
+        logger.info(f"Image uploaded to S3 at key: {image_key}")
         return image_key
 
     def extract_text(self, s3_key: str) -> str:
         response = self.textract.detect_document_text(
             Document={'S3Object': {'Bucket': self.bucket, 'Name': s3_key}}
         )
-        return "\n".join(
-            block["Text"] for block in response["Blocks"] if block["BlockType"] == "LINE"
-        )
-    
-
-    
+        lines = []
+        for block in response["Blocks"]:
+            if block["BlockType"] == "LINE":
+                text = block["Text"]
+                confidence = block.get("Confidence", 0)
+                logger.debug(f"Line: '{text}' (Confidence: {confidence:.2f}%)")
+                lines.append(text)
+        return "\n".join(lines)
