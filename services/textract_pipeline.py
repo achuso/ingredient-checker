@@ -1,4 +1,4 @@
-from PIL import Image, ImageEnhance, ImageFilter
+from PIL import Image, ImageEnhance, ImageFilter, ImageStat, ImageOps
 import io
 import boto3
 import base64
@@ -28,17 +28,29 @@ class TextractProcessor:
         self.bucket = bucket_name
 
     def _preprocess_image(self, image_data: bytes) -> bytes:
-        """Preprocess the image for Textract OCR."""
+        """Preprocess image with OCR-friendly enhancements."""
         img = Image.open(io.BytesIO(image_data)).convert("RGB")
-        img.thumbnail((1000, 1000))
+        width, height = img.size
+
+        # Resize if img too big
+        if max(width, height) > 1500: img.thumbnail((1500, 1500))
+        # Grayscale
         gray = img.convert("L")
-        contrast = ImageEnhance.Contrast(gray).enhance(2.5)
-        sharp = contrast.filter(ImageFilter.SHARPEN)
-        thresholded = sharp.point(lambda p: 255 if p > 180 else 0)
-        final = thresholded.convert("RGB")
+        # Contrast adjustment based on brightness
+        brightness = ImageStat.Stat(gray).mean[0]
+        contrast_boost = 2.0 if brightness < 100 else 1.5
+        contrast = ImageEnhance.Contrast(gray).enhance(contrast_boost)
+
+        sharpened = contrast.filter(ImageFilter.UnsharpMask(radius=1.5, percent=120, threshold=5))
+
+        # Light padding
+        padded = ImageOps.expand(sharpened, border=10, fill='white')
+        # Convert to RGB and save
+        final = padded.convert("RGB")
         output = io.BytesIO()
-        final.save(output, format="JPEG", quality=65, optimize=True)
+        final.save(output, format="JPEG", quality=85, optimize=True)
         return output.getvalue()
+
 
     def save_image_to_s3(self, image_b64: str) -> str:
         image_data = base64.b64decode(image_b64)
