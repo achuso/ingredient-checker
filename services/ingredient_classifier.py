@@ -39,9 +39,13 @@ class IngredientClassifier:
         parts = re.split(r",|\.", text)
         return [self.normalize(p.strip()) for p in parts if len(p.strip()) > 1]
 
-    def classify(self, text: str, restriction: str) -> List[Dict[str, str]]:
-        extracted = self.extract_ingredient_section(text)
-        ingredients = self.split_ingredients(extracted)
+    def classify(self, input_data: str | List[str], restriction: str) -> List[Dict[str, str]]:
+        if isinstance(input_data, list):
+            ingredients = [self.normalize(i) for i in input_data]
+        else:
+            extracted = self.extract_ingredient_section(input_data)
+            ingredients = self.split_ingredients(extracted)
+
         rule = self.rules.get(restriction, {})
         all_known = rule.get("unsafe", []) + rule.get("maybe", []) + rule.get("safe", [])
         all_known_normalized = [self.normalize(i) for i in all_known]

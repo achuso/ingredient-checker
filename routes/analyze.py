@@ -1,4 +1,4 @@
-from fastapi import APIRouter, HTTPException, Query
+from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from services.textract_pipeline import TextractProcessor
 from services.ingredient_classifier import IngredientClassifier
@@ -18,12 +18,13 @@ async def analyze_product(data: UploadRequest):
         classifier = IngredientClassifier()
 
         s3_key = await run_in_threadpool(processor.save_image_to_s3, data.image_base64)
-        extracted_text = await run_in_threadpool(processor.extract_text, s3_key)
-        classified = await run_in_threadpool(classifier.classify, extracted_text, data.restriction)
+        ingredients = await run_in_threadpool(processor.extract_ingredient_lines, s3_key)
+        classified = await run_in_threadpool(classifier.classify, ingredients, data.restriction)
 
         return {
             "s3_key": s3_key,
-            "text": extracted_text,
+            "raw_text": await run_in_threadpool(processor.extract_text, s3_key), # For debugging
+            "ingredients": ingredients,
             "classified": classified
         }
 

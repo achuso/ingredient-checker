@@ -1,4 +1,4 @@
-from PIL import Image, ImageEnhance, ImageFilter, ImageStat, ImageOps
+from PIL import Image, ImageEnhance
 import io
 import boto3
 import base64
@@ -6,8 +6,9 @@ import uuid
 import os
 import functools
 import logging
-
-from fastapi.concurrency import run_in_threadpool
+import cv2
+import numpy as np
+from services.nlp_utils import extract_ingredients
 
 BUCKET_NAME = "img-storage-s3-479"
 logger = logging.getLogger(__name__)
@@ -28,29 +29,41 @@ class TextractProcessor:
         self.bucket = bucket_name
 
     def _preprocess_image(self, image_data: bytes) -> bytes:
-        """Preprocess image with OCR-friendly enhancements."""
-        img = Image.open(io.BytesIO(image_data)).convert("RGB")
-        width, height = img.size
+        # Convert to numpy img
+        np_img = np.frombuffer(image_data, np.uint8)
+        cv_img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
 
-        # Resize if img too big
-        if max(width, height) > 1500: img.thumbnail((1500, 1500))
-        # Grayscale
-        gray = img.convert("L")
-        # Contrast adjustment based on brightness
-        brightness = ImageStat.Stat(gray).mean[0]
-        contrast_boost = 2.0 if brightness < 100 else 1.5
-        contrast = ImageEnhance.Contrast(gray).enhance(contrast_boost)
+        # Resize if needed
+        max_dim = 1500
+        h, w = cv_img.shape[:2]
+        if max(h, w) > max_dim:
+            scale = max_dim / float(max(h, w))
+            cv_img = cv2.resize(cv_img, (int(w * scale), int(h * scale)))
 
-        sharpened = contrast.filter(ImageFilter.UnsharpMask(radius=1.5, percent=120, threshold=5))
+        # Blur detection
+        gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
+        blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
+        BLUR_THRESHOLD = 100
 
-        # Light padding
-        padded = ImageOps.expand(sharpened, border=10, fill='white')
-        # Convert to RGB and save
-        final = padded.convert("RGB")
+        # Different preprocessing approaches based on blur score
+        if blur_score >= BLUR_THRESHOLD:
+            # Pillow-based light pipeline
+            pil_img = Image.fromarray(cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)).convert("L")
+            contrast = ImageEnhance.Contrast(pil_img).enhance(1.3)
+            final = contrast.convert("RGB")
+        else:
+            # OpenCV heavy pipeline
+            denoised = cv2.bilateralFilter(gray, 9, 75, 75)
+            thresh = cv2.adaptiveThreshold(
+                denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                cv2.THRESH_BINARY, 11, 2
+            )
+            padded = cv2.copyMakeBorder(thresh, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
+            final = Image.fromarray(padded).convert("RGB")
+
         output = io.BytesIO()
         final.save(output, format="JPEG", quality=85, optimize=True)
         return output.getvalue()
-
 
     def save_image_to_s3(self, image_b64: str) -> str:
         image_data = base64.b64decode(image_b64)
@@ -78,3 +91,8 @@ class TextractProcessor:
                 logger.debug(f"Line: '{text}' (Confidence: {confidence:.2f}%)")
                 lines.append(text)
         return "\n".join(lines)
+
+    def extract_ingredient_lines(self, s3_key: str) -> list[str]:
+        raw_text = self.extract_text(s3_key)
+        return extract_ingredients(raw_text)
+    
