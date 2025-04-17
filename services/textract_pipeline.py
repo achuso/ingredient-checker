@@ -8,7 +8,7 @@ import functools
 import logging
 import cv2
 import numpy as np
-from services.nlp_utils import extract_ingredients
+from services.ingredient_utils import extract_ingredients
 
 BUCKET_NAME = "img-storage-s3-479"
 logger = logging.getLogger(__name__)
