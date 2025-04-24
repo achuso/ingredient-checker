@@ -5,6 +5,7 @@ from fastapi import HTTPException
 async def get_db():
     try:
         return await asyncpg.connect(
+            # These are set in AWS Lambda environment variables
             host=os.getenv("DB_HOST"),
             port=int(os.getenv("DB_PORT", "5432")),
             user=os.getenv("DB_USER"),
