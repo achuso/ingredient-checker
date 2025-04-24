@@ -5,5 +5,9 @@ boto3
 filetype
 Pillow
 piexif
-opencv-python-headless
-numpy
+#opencv-python-headless
+#numpy
+asyncpg
+python-jose[cryptography]
+bcrypt
+pydantic[email]

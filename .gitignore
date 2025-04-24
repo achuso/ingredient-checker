@@ -1,3 +1,4 @@
 .aws/
 lambda_build/
 *.zip
+.env

@@ -1,7 +1,9 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
-from services.textract_pipeline import TextractProcessor
-from services.ingredient_classifier import IngredientClassifier
+
+from services.analyze.textract_pipeline import TextractProcessor
+from services.analyze.ingredient_classifier import IngredientClassifier
+
 from fastapi.concurrency import run_in_threadpool
 import traceback
 

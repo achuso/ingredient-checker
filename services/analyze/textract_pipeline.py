@@ -3,12 +3,9 @@ import io
 import boto3
 import base64
 import uuid
-import os
 import functools
 import logging
-import cv2
-import numpy as np
-from services.ingredient_utils import extract_ingredients
+from services.analyze.ingredient_utils import extract_ingredients
 
 BUCKET_NAME = "img-storage-s3-479"
 logger = logging.getLogger(__name__)
@@ -29,37 +26,10 @@ class TextractProcessor:
         self.bucket = bucket_name
 
     def _preprocess_image(self, image_data: bytes) -> bytes:
-        # Convert to numpy img
-        np_img = np.frombuffer(image_data, np.uint8)
-        cv_img = cv2.imdecode(np_img, cv2.IMREAD_COLOR)
-
-        # Resize if needed
-        max_dim = 1500
-        h, w = cv_img.shape[:2]
-        if max(h, w) > max_dim:
-            scale = max_dim / float(max(h, w))
-            cv_img = cv2.resize(cv_img, (int(w * scale), int(h * scale)))
-
-        # Blur detection
-        gray = cv2.cvtColor(cv_img, cv2.COLOR_BGR2GRAY)
-        blur_score = cv2.Laplacian(gray, cv2.CV_64F).var()
-        BLUR_THRESHOLD = 100
-
-        # Different preprocessing approaches based on blur score
-        if blur_score >= BLUR_THRESHOLD:
-            # Pillow-based light pipeline
-            pil_img = Image.fromarray(cv2.cvtColor(cv_img, cv2.COLOR_BGR2RGB)).convert("L")
-            contrast = ImageEnhance.Contrast(pil_img).enhance(1.3)
-            final = contrast.convert("RGB")
-        else:
-            # OpenCV heavy pipeline
-            denoised = cv2.bilateralFilter(gray, 9, 75, 75)
-            thresh = cv2.adaptiveThreshold(
-                denoised, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-                cv2.THRESH_BINARY, 11, 2
-            )
-            padded = cv2.copyMakeBorder(thresh, 10, 10, 10, 10, cv2.BORDER_CONSTANT, value=255)
-            final = Image.fromarray(padded).convert("RGB")
+        input_stream = io.BytesIO(image_data)
+        pil_img = Image.open(input_stream).convert("L")  # grayscale
+        enhanced = ImageEnhance.Contrast(pil_img).enhance(1.4)  # boost contrast
+        final = enhanced.convert("RGB")
 
         output = io.BytesIO()
         final.save(output, format="JPEG", quality=85, optimize=True)
