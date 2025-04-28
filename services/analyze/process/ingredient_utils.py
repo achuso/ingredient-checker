@@ -12,12 +12,13 @@ def contains_fuzzy(text: str, keywords: list[str], cutoff=0.8) -> bool:
             return True
     return False
 
-def extract_ingredients(text: str) -> list[str]:
+def extract_ingredients_and_traces(text: str) -> tuple[list[str], list[str]]:
     lines = text.splitlines()
 
     start_idx = -1
     ingredients_lines = []
-
+    trace_lines = []
+    
     for i, line in enumerate(lines):
         norm_line = normalize(line)
         words = re.sub(r"[^\w\s]", "", norm_line).split()
@@ -32,11 +33,11 @@ def extract_ingredients(text: str) -> list[str]:
             break
 
     if start_idx == -1:
-        return []
+        return [], []
 
     cutoff_keywords = [
-        "eser miktarda", "iz miktarda", "enerji", "besin", "saklama", "tüketim",
-        "net agirlik", "net ağırlık", "kullanim", "kullanım", "tett", "serin",
+        "eser miktarda", "iz miktarda", "may contain", "traces of", "enerji", "besin", "saklama", 
+        "tuketim", "net agirlik", "net ağırlık", "kullanim", "kullanım", "tett", "serin",
         "gida isletmecisi", "gıda işletmecisi", "uret", "üret", "firma", "adres"
     ]
 
@@ -55,70 +56,87 @@ def extract_ingredients(text: str) -> list[str]:
         ]
         return any(check() for check in checks)
 
+    collecting_traces = False
+
     for line in lines[start_idx + 1:]:
         normalized = normalize(re.sub(r"[^\w\s]", "", line))
+
         if should_cut(normalized, line):
             break
-        ingredients_lines.append(line)
 
-    full = " ".join(ingredients_lines).replace(" ,", ",").strip()
+        if not collecting_traces:
+            if "eser miktarda" in normalized or "iz miktarda" in normalized or "may contain" in normalized or "traces of" in normalized:
+                collecting_traces = True
+                trace_lines.append(line)
+            else:
+                ingredients_lines.append(line)
+        else:
+            trace_lines.append(line)
 
-    ingredients = []
-    part = ""
-    round_depth = 0
-    square_depth = 0
-    MAX_LEN = 150
-    MAX_DEPTH = 2
+    def split_lines_into_ingredients(lines: list[str]) -> list[str]:
+        full = " ".join(lines).replace(" ,", ",").strip()
 
-    def finalize_part(p):
-        p = p.strip()
-        norm = normalize(p)
-        for phrase in inline_cutoffs:
-            if phrase in norm or contains_fuzzy(norm, inline_cutoffs):
-                period_index = p.find(".")
-                phrase_index = norm.find(phrase)
-                if 0 <= period_index < phrase_index:
-                    return p[:period_index].strip()
-                else:
-                    return p[:phrase_index].strip()
-        return p
+        ingredients = []
+        part = ""
+        round_depth = 0
+        square_depth = 0
+        MAX_LEN = 250
+        MAX_DEPTH = 2
 
-    for i, char in enumerate(full):
-        if char in "([)]":
-            if char == "(":
-                round_depth += 1
-            elif char == ")":
-                round_depth = max(0, round_depth - 1)
-            elif char == "[":
-                square_depth += 1
-            elif char == "]":
-                square_depth = max(0, square_depth - 1)
+        def finalize_part(p):
+            p = p.strip()
+            norm = normalize(p)
+            for phrase in inline_cutoffs:
+                if phrase in norm or contains_fuzzy(norm, inline_cutoffs):
+                    period_index = p.find(".")
+                    phrase_index = norm.find(phrase)
+                    if 0 <= period_index < phrase_index:
+                        return p[:period_index].strip()
+                    else:
+                        return p[:phrase_index].strip()
+            return p
 
-        next_char = full[i+1] if i + 1 < len(full) else ""
-        force_boundary = (
-            part.endswith(")") or part.endswith("]") or
-            part.strip().startswith(")") or part.strip().startswith("]") or
-            (char == "." and next_char == " ")
-        )
+        for i, char in enumerate(full):
+            if char in "([)]":
+                if char == "(":
+                    round_depth += 1
+                elif char == ")":
+                    round_depth = max(0, round_depth - 1)
+                elif char == "[":
+                    square_depth += 1
+                elif char == "]":
+                    square_depth = max(0, square_depth - 1)
 
-        should_split = (
-            (char == "," and round_depth == 0 and square_depth == 0) or
-            (len(part) > MAX_LEN and round_depth == 0 and square_depth == 0) or
-            (round_depth > MAX_DEPTH or square_depth > MAX_DEPTH) or
-            force_boundary
-        )
+            next_char = full[i+1] if i + 1 < len(full) else ""
+            force_boundary = (
+                part.endswith(")") or part.endswith("]") or
+                part.strip().startswith(")") or part.strip().startswith("]") or
+                (char == "." and next_char == " ")
+            )
 
-        if should_split:
+            should_split = (
+                (char == "," and round_depth == 0 and square_depth == 0) or
+                (len(part) > MAX_LEN and round_depth == 0 and square_depth == 0) or
+                (round_depth > MAX_DEPTH or square_depth > MAX_DEPTH) or
+                force_boundary
+            )
+
+            if should_split:
+                cleaned = finalize_part(part)
+                if cleaned:
+                    ingredients.append(cleaned)
+                part = ""
+            else:
+                part += char
+
+        if part.strip():
             cleaned = finalize_part(part)
             if cleaned:
                 ingredients.append(cleaned)
-            part = ""
-        else:
-            part += char
 
-    if part.strip():
-        cleaned = finalize_part(part)
-        if cleaned:
-            ingredients.append(cleaned)
+        return ingredients
 
-    return ingredients
+    ingredients = split_lines_into_ingredients(ingredients_lines)
+    traces = split_lines_into_ingredients(trace_lines)
+
+    return ingredients, traces

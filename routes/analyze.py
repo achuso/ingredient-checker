@@ -35,13 +35,22 @@ async def upload_image(data: UploadRequest):
 @router.post("/process")
 async def analyze_image(data: AnalyzeRequest):
     try:
-        ingredients = await run_in_threadpool(ocr_service.extract_ingredients_from_s3, data.s3_key)
-        classified = await run_in_threadpool(classification_service.classify_ingredients, ingredients, data.restriction)
+        parsed = await run_in_threadpool(ocr_service.extract_ingredients_from_s3, data.s3_key)
+
+        ingredients = parsed["ingredients"]
+        traces = parsed["traces"]
+
+        classified_ingredients = await run_in_threadpool(classification_service.classify_ingredients, ingredients, data.restriction)
+        classified_traces = await run_in_threadpool(classification_service.classify_ingredients, traces, data.restriction)
+
+        result = {
+            "ingredients": {c["ingredient"]: {"status": c["status"]} for c in classified_ingredients},
+            "traces": {c["ingredient"]: {"status": c["status"]} for c in classified_traces}
+        }
 
         return {
             "s3_key": data.s3_key,
-            "ingredients": ingredients,
-            "classified": classified
+            "classified": result
         }
     
     except Exception as e:

@@ -1,7 +1,7 @@
 import boto3
 import functools
 import logging
-from services.analyze.process.ingredient_utils import extract_ingredients
+from services.analyze.process.ingredient_utils import extract_ingredients_and_traces
 
 logger = logging.getLogger(__name__)
 
@@ -30,7 +30,10 @@ class OCRService:
             logger.error(f"OCR extraction failed: {str(e)}")
             raise
 
-    def extract_ingredients_from_s3(self, s3_key: str) -> list[str]:
+    def extract_ingredients_from_s3(self, s3_key: str) -> dict:
         text = self.extract_text(s3_key)
-        ingredients = extract_ingredients(text)
-        return ingredients
+        ingredients, traces = extract_ingredients_and_traces(text)
+        return {
+            "ingredients": ingredients,
+            "traces": traces
+        }
