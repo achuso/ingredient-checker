@@ -5,7 +5,6 @@ from typing import List, Dict
 
 class IngredientClassifier:
     def __init__(self):
-        # Temporary rules, to be changed later
         self.rules = {
             "celiac": {
                 "unsafe": ["buğday", "arpa", "malt", "çavdar", "irmik", "bulgur", "gluten", "buğday unu"],
@@ -32,7 +31,7 @@ class IngredientClassifier:
         for i, line in enumerate(lines):
             if "ingredient" in line.lower() or "içindekiler" in line.lower():
                 return " ".join(lines[i:])
-        return text  # Fallback to full text, if extraction fails
+        return text
 
     def split_ingredients(self, text: str) -> List[str]:
         text = text.replace("\n", ",").replace(";", ",")
@@ -61,7 +60,6 @@ class IngredientClassifier:
             elif item in [self.normalize(i) for i in rule.get("safe", [])]:
                 label = "safe"
             else:
-                # Fuzzy matching
                 match = get_close_matches(item, all_known_normalized, n=1, cutoff=0.8)
                 if match:
                     idx = all_known_normalized.index(match[0])
