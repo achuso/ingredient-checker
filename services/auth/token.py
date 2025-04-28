@@ -2,7 +2,7 @@ from jose import jwt
 from datetime import datetime, timedelta, timezone
 import os
 
-SECRET_KEY = os.getenv("SECRET_KEY", "totally-safe-secret-key-8!kJ=~479")
+SECRET_KEY = os.getenv("SECRET_KEY", "totally-SAFE-secret-Key-8!kJ=~479")
 ALGORITHM = "HS256"
 ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
 

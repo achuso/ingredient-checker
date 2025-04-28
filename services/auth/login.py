@@ -1,12 +1,11 @@
-from fastapi import HTTPException, status
-import bcrypt
-import asyncpg
-
-from services.db_conn import get_db
+from services.db_conn import Database
 from services.auth.token import create_access_token
+from fastapi import HTTPException
+import bcrypt
 
 async def login_user(email: str, password: str):
-    db = await get_db()
+    db = Database()
+    await db.connect()
 
     try:
         row = await db.fetchrow(
@@ -21,11 +20,6 @@ async def login_user(email: str, password: str):
 
         token = create_access_token({"sub": str(row["user_id"])})
         return {"access_token": token, "token_type": "bearer"}
-
-    except asyncpg.PostgresError as e:
-        raise HTTPException(status_code=500, detail=f"Database error: {str(e)}")
-    except Exception as e:
-        raise HTTPException(status_code=500, detail=f"Unexpected error: {str(e)}")
 
     finally:
         await db.close()
