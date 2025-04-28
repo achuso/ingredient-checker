@@ -44,7 +44,8 @@ CREATE TABLE scan_ingredients (
     id UUID PRIMARY KEY DEFAULT gen_random_uuid(),
     scan_id UUID REFERENCES scans(scan_id) ON DELETE CASCADE,
     ingredient_name TEXT NOT NULL,
-    verdict scan_verdict NOT NULL
+    verdict scan_verdict NOT NULL,
+    is_trace BOOLEAN DEFAULT FALSE,
 );
 
 CREATE TABLE password_resets (
