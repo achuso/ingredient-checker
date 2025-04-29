@@ -1,142 +1,249 @@
+from __future__ import annotations
+
 import re
 import unicodedata
-from difflib import get_close_matches
+from difflib import SequenceMatcher
+from typing import List, Tuple
+
+__all__ = [
+    "normalize",
+    "contains_fuzzy",
+    "fuzzy_clean_header",
+    "isolate_ingredient_block",
+    "find_trace_start",
+    "smart_split",
+    "trace_items",
+    "extract_ingredients_and_traces",
+]
+
+# Constants
+
+HEADER_VARIANTS = [
+    "icindekiler",
+    "içindekiler",
+    "licindekiler",
+    "lçindekiler",
+    "icindekıler",
+]
+
+END_BLOCK_KEYWORDS = [
+    "enerji",
+    "besin degeri",
+    "besin değer",
+    "nutrition",
+    "nutritional",
+    "kalori",
+]
+
+TRACE_TRIGGERS = [
+    "eser miktarda",
+    "iz miktarda",
+    "may contain",
+    "traces of",
+    "içerebilir",
+]
+
+# Regexes to remove boiler‑plate from trace sentences
+
+TRACE_PREFIX_RE = re.compile(
+    r"^(?:iz|eser)?\s*miktarda\s+|^may contain\s+|^traces of\s+", re.I
+)
+TRACE_SUFFIX_RE = re.compile(
+    r"\b(icerebilir|içerebilir|olabilir|icerir|contains?)\b.*$", re.I
+)
+
+MIN_TOKEN_LEN = 4
+
+RE_ACCENTS = re.compile(r"[^0-9a-zA-ZğüşöçıİĞÜŞÖÇ%.,()\[\] ]+")
+RE_WHITESPACE_MULTI = re.compile(r"\s+")
+
+# Core helpers
 
 def normalize(text: str) -> str:
-    return unicodedata.normalize("NFKD", text).encode("ASCII", "ignore").decode("utf-8").lower()
+    """ASCII‑folded lower‑case string with collapsed whitespace."""
+    if not text:
+        return ""
+    txt = text.lower().replace("ı", "i")
+    txt = unicodedata.normalize("NFD", txt)
+    txt = "".join(ch for ch in txt if unicodedata.category(ch) != "Mn")
+    txt = RE_ACCENTS.sub("", txt)
+    txt = RE_WHITESPACE_MULTI.sub(" ", txt).strip()
+    return txt
 
-def contains_fuzzy(text: str, keywords: list[str], cutoff=0.8) -> bool:
-    words = text.split()
-    for word in words:
-        if get_close_matches(word, keywords, n=1, cutoff=cutoff):
+
+def _similar(a: str, b: str) -> float:
+    return SequenceMatcher(a=a, b=b).ratio()
+
+
+def contains_fuzzy(text: str, keywords: List[str], cutoff: float = 0.75) -> bool:
+    norm = normalize(text)
+    for kw in keywords:
+        if kw in norm or _similar(norm, kw) >= cutoff:
             return True
+        for tok in norm.split():
+            if _similar(tok, kw.split()[0]) >= cutoff:
+                return True
     return False
 
-def extract_ingredients_and_traces(text: str) -> tuple[list[str], list[str]]:
-    lines = text.splitlines()
+# Header isolation
 
-    start_idx = -1
-    ingredients_lines = []
-    trace_lines = []
-    
-    for i, line in enumerate(lines):
-        norm_line = normalize(line)
-        words = re.sub(r"[^\w\s]", "", norm_line).split()
-        match = get_close_matches("icindekiler", words, n=1, cutoff=0.7)
-        if match:
-            keyword_idx = norm_line.find(match[0])
-            if keyword_idx != -1:
-                header_cleaned = line[keyword_idx + len(match[0]):].strip(": -").strip()
-                if header_cleaned:
-                    ingredients_lines.append(header_cleaned)
-            start_idx = i
-            break
+def fuzzy_clean_header(text: str) -> str:
+    if not text:
+        return text
+    raw = text.lstrip()
+    prefix = normalize(raw[:35])
+    for variant in HEADER_VARIANTS:
+        if _similar(prefix[: len(variant)], variant) >= 0.8:
+            idx = raw.find(":")
+            if idx == -1:
+                idx = raw.find("\n")
+            if idx != -1:
+                return raw[idx + 1 :].lstrip()
+            return raw[len(variant) :].lstrip()
+    return text
 
-    if start_idx == -1:
-        return [], []
 
-    cutoff_keywords = [
-        "eser miktarda", "iz miktarda", "may contain", "traces of", "enerji", "besin", "saklama", 
-        "tuketim", "net agirlik", "net ağırlık", "kullanim", "kullanım", "tett", "serin",
-        "gida isletmecisi", "gıda işletmecisi", "uret", "üret", "firma", "adres"
-    ]
+def isolate_ingredient_block(text: str) -> str:
+    cleaned = fuzzy_clean_header(text)
+    norm = normalize(cleaned)
+    cut_pos = len(cleaned)
+    for kw in END_BLOCK_KEYWORDS:
+        idx = norm.find(kw)
+        if idx != -1:
+            cut_pos = min(cut_pos, idx)
+    return cleaned[:cut_pos].strip()
 
-    inline_cutoffs = [
-        "gida kodeksi", "fermente", "uretilmistir", "üretim", "tebligi", "parti numarasi",
-        "tüketim tarihi", "saklayiniz", "serin yerde", "ambalaj", "miktarda"
-    ]
+# Trace helpers
 
-    def should_cut(normalized_line: str, raw_line: str) -> bool:
-        checks = [
-            lambda: any(kw in normalized_line for kw in cutoff_keywords),
-            lambda: any(phrase in normalized_line for phrase in inline_cutoffs),
-            lambda: contains_fuzzy(normalized_line, inline_cutoffs),
-            lambda: re.match(r"^[0-9\s]+g$", raw_line) is not None,
-            lambda: re.search(r"\d{2}\.\d{2}", raw_line) is not None
-        ]
-        return any(check() for check in checks)
+def _nearest_sentence_boundary(text: str, idx: int) -> int:
+    left_dot = text.rfind(".", 0, idx)
+    left_nl = text.rfind("\n", 0, idx)
+    boundary = max(left_dot, left_nl)
+    return boundary + 1 if boundary != -1 else 0
 
-    collecting_traces = False
 
-    for line in lines[start_idx + 1:]:
-        normalized = normalize(re.sub(r"[^\w\s]", "", line))
+def find_trace_start(text: str) -> int:
+    norm = normalize(text)
+    best_idx = len(text)
+    for trigger in TRACE_TRIGGERS + ["miktarda", "contain"]:
+        hit = norm.find(trigger)
+        if hit != -1:
+            best_idx = min(best_idx, hit)
+    return _nearest_sentence_boundary(text, best_idx)
 
-        if should_cut(normalized, line):
-            break
+# Ingredient splitting
 
-        if not collecting_traces:
-            if "eser miktarda" in normalized or "iz miktarda" in normalized or "may contain" in normalized or "traces of" in normalized:
-                collecting_traces = True
-                trace_lines.append(line)
-            else:
-                ingredients_lines.append(line)
-        else:
-            trace_lines.append(line)
+def _clean_token(token: str) -> str | None:
+    tok = RE_WHITESPACE_MULTI.sub(" ", token.replace("\n", " ")).strip(" ,.;:\n\t")
+    if not tok:
+        return None
+    if len(tok) < MIN_TOKEN_LEN and re.fullmatch(r"[^a-zA-ZğüşöçıİĞÜŞÖÇ]+", tok):
+        return None
+    return tok
 
-    def split_lines_into_ingredients(lines: list[str]) -> list[str]:
-        full = " ".join(lines).replace(" ,", ",").strip()
 
-        ingredients = []
-        part = ""
-        round_depth = 0
-        square_depth = 0
-        MAX_LEN = 250
-        MAX_DEPTH = 2
-
-        def finalize_part(p):
-            p = p.strip()
-            norm = normalize(p)
-            for phrase in inline_cutoffs:
-                if phrase in norm or contains_fuzzy(norm, inline_cutoffs):
-                    period_index = p.find(".")
-                    phrase_index = norm.find(phrase)
-                    if 0 <= period_index < phrase_index:
-                        return p[:period_index].strip()
-                    else:
-                        return p[:phrase_index].strip()
-            return p
-
-        for i, char in enumerate(full):
-            if char in "([)]":
-                if char == "(":
-                    round_depth += 1
-                elif char == ")":
-                    round_depth = max(0, round_depth - 1)
-                elif char == "[":
-                    square_depth += 1
-                elif char == "]":
-                    square_depth = max(0, square_depth - 1)
-
-            next_char = full[i+1] if i + 1 < len(full) else ""
-            force_boundary = (
-                part.endswith(")") or part.endswith("]") or
-                part.strip().startswith(")") or part.strip().startswith("]") or
-                (char == "." and next_char == " ")
-            )
-
-            should_split = (
-                (char == "," and round_depth == 0 and square_depth == 0) or
-                (len(part) > MAX_LEN and round_depth == 0 and square_depth == 0) or
-                (round_depth > MAX_DEPTH or square_depth > MAX_DEPTH) or
-                force_boundary
-            )
-
-            if should_split:
-                cleaned = finalize_part(part)
-                if cleaned:
-                    ingredients.append(cleaned)
-                part = ""
-            else:
-                part += char
-
-        if part.strip():
-            cleaned = finalize_part(part)
+def smart_split(text: str) -> List[str]:
+    parts: List[str] = []
+    buf: List[str] = []
+    depth_sq = depth_par = 0
+    for ch in text:
+        if ch == "[":
+            depth_sq += 1
+        elif ch == "]":
+            depth_sq = max(0, depth_sq - 1)
+        elif ch == "(":
+            depth_par += 1
+        elif ch == ")":
+            depth_par = max(0, depth_par - 1)
+        if ch in ",." and depth_sq == 0 and depth_par == 0:
+            cleaned = _clean_token("".join(buf))
             if cleaned:
-                ingredients.append(cleaned)
+                parts.append(cleaned)
+            buf.clear()
+        else:
+            buf.append(ch)
+    cleaned = _clean_token("".join(buf))
+    if cleaned:
+        parts.append(cleaned)
+    return parts
 
-        return ingredients
+# Trace‑item extraction
 
-    ingredients = split_lines_into_ingredients(ingredients_lines)
-    traces = split_lines_into_ingredients(trace_lines)
+def trace_items(sentence: str) -> List[str]:
+    if not sentence:
+        return []
 
-    return ingredients, traces
+    core = normalize(sentence)
+
+    # Define bounds for all the 'traces'
+    prefix_idx = None
+    for kw in ("miktarda", "contain", "traces of"):
+        pos = core.find(kw)
+        if pos != -1:
+            prefix_idx = pos + len(kw)
+            break
+    if prefix_idx is not None:
+        core = core[prefix_idx:]
+
+    for kw in ("icere", "içere", "olabilir", "contains"):
+        pos = core.find(kw)
+        if pos != -1:
+            core = core[:pos]
+            break
+
+    core = core.strip()
+    if not core:
+        return []
+
+    # Split commas/dots/'ve', bracket-aware
+    pieces = smart_split(core)
+    items: List[str] = []
+    for p in pieces:
+        for bit in re.split(r"(?:ve|and)", p):
+            cleaned = _clean_token(bit)
+            if cleaned and cleaned not in items:
+                items.append(cleaned)
+    return items
+
+# Public pipeline
+
+def _clean_trace_sentence(sentence: str) -> str | None:
+    if not sentence:
+        return None
+    tok_list = sentence.strip().split()
+    while tok_list and (len(tok_list[0]) < 4 or re.search(r"[^a-zA-ZğüşöçıİĞÜŞÖÇ]", tok_list[0])):
+        tok_list.pop(0)
+    if not tok_list:
+        return None
+    clean_sentence = " ".join(tok_list)
+    clean_sentence = RE_WHITESPACE_MULTI.sub(" ", clean_sentence).capitalize()
+    if not clean_sentence.endswith("."):
+        clean_sentence += "."
+    return clean_sentence
+
+
+def extract_ingredients_and_traces(text: str) -> Tuple[List[str], List[str]]:
+    if not text:
+        return ([], [])
+
+    block = isolate_ingredient_block(text)
+    if not block:
+        return ([], [])
+
+    trace_start = find_trace_start(block)
+    ingredient_part = block[:trace_start]
+    trace_part = block[trace_start:]
+
+    ingredients = smart_split(ingredient_part)
+
+    trace_ingredients: List[str] = []
+    for sentence in re.split(r"[.]", trace_part):
+        sen = sentence.strip()
+        if not sen:
+            continue
+        if contains_fuzzy(sen, TRACE_TRIGGERS, 0.6):
+            for item in trace_items(sen):
+                if item not in trace_ingredients:
+                    trace_ingredients.append(item)
+    return (ingredients, trace_ingredients)
+    
