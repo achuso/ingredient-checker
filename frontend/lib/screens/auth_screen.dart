@@ -2,6 +2,7 @@ import 'dart:convert';
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
 import '../config.dart';
+import 'main_page.dart';
 
 class AuthScreen extends StatefulWidget {
   const AuthScreen({super.key});
@@ -58,16 +59,9 @@ class _AuthScreenState extends State<AuthScreen> {
       );
 
       if (response.statusCode == 200) {
-        await showDialog(
-          context: context,
-          builder: (ctx) => const AlertDialog(
-            title: Text('Login Successful!'),
-            content: Icon(Icons.check_circle, color: Colors.green, size: 64),
-          ),
-        );
         Navigator.pushReplacement(
           context,
-          MaterialPageRoute(builder: (_) => const MainPage()),
+          MaterialPageRoute(builder: (context) => MainPage()),
         );
       } else {
         final errMsg = jsonDecode(response.body)['message'] ?? 'Login failed';
@@ -185,13 +179,3 @@ class _AuthScreenState extends State<AuthScreen> {
   }
 }
 
-class MainPage extends StatelessWidget {
-  const MainPage({super.key});
-
-  @override
-  Widget build(BuildContext context) {
-    return const Scaffold(
-      body: Center(child: Text("Main Page")),
-    );
-  }
-}
