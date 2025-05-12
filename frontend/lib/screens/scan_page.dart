@@ -1,7 +1,29 @@
 import 'package:flutter/material.dart';
+import 'package:image_picker/image_picker.dart';
+import 'dart:io';
 
-class ScanPage extends StatelessWidget {
+class ScanPage extends StatefulWidget {
   const ScanPage({Key? key}) : super(key: key);
+
+  @override
+  State<ScanPage> createState() => _ScanPageState();
+}
+
+class _ScanPageState extends State<ScanPage> {
+  File? _selectedImage;
+
+  Future<void> _pickFromGallery() async {
+    final picker = ImagePicker();
+    final pickedFile = await picker.pickImage(source: ImageSource.gallery);
+
+    if (pickedFile != null) {
+      setState(() {
+        _selectedImage = File(pickedFile.path);
+      });
+
+      // TODO: Upload or analyze the image
+    }
+  }
 
   @override
   Widget build(BuildContext context) {
@@ -29,14 +51,18 @@ class ScanPage extends StatelessWidget {
                 mainAxisAlignment: MainAxisAlignment.center,
                 children: [
                   _actionButton('Camera', Icons.photo_camera, onPressed: () {
-                    // TO-DO: camera logic
+                    // TODO: camera logic
                   }),
                   const SizedBox(width: 20),
-                  _actionButton('Gallery', Icons.photo_library, onPressed: () {
-                    // TO-DO: gallery picker logic
-                  }),
+                  _actionButton('Gallery', Icons.photo_library, onPressed: _pickFromGallery),
                 ],
               ),
+              const SizedBox(height: 40),
+              if (_selectedImage != null)
+                ClipRRect(
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.file(_selectedImage!, height: 220),
+                ),
             ],
           ),
         ),
