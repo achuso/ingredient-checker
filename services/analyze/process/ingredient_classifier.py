@@ -1,76 +1,77 @@
-import re
-import unicodedata
-from difflib import get_close_matches
-from typing import List, Dict
+from __future__ import annotations
+import json, re, unicodedata
+from pathlib import Path
+from typing import Iterable, List, Dict
+
+_RULES_FILE = Path(__file__).with_name("rules.json")   # …or inject via __init__
+
+
+def _normalize(text: str) -> str:
+    # ASCII-fold Turkish chars, lower-case, collapse spaces
+    text = unicodedata.normalize("NFD", text.lower())
+    text = "".join(ch for ch in text if unicodedata.category(ch) != "Mn")
+    return re.sub(r"\s{2,}", " ", text).strip()
+
 
 class IngredientClassifier:
-    def __init__(self):
-        self.rules = {
-            "celiac": {
-                "unsafe": ["buğday", "arpa", "malt", "çavdar", "irmik", "bulgur", "gluten", "buğday unu"],
-                "maybe": ["yulaf", "nişasta", "modifiye nişasta", "aroma"],
-                "safe": []
-            },
-            "vegan": {
-                "unsafe": ["süt", "yumurta", "peynir", "jelatin", "kazein", "bal", "tereyağı", "yoğurt", "süt tozu"],
-                "maybe": ["laktik asit", "vitamin d3"],
-                "safe": []
-            },
-            "nut_allergy": {
-                "unsafe": ["badem", "kaju", "fındık", "ceviz", "antep fıstığı", "yer fıstığı"],
-                "maybe": [],
-                "safe": []
+    def __init__(self, rules_path: str | Path = _RULES_FILE):
+        self.rules_path = Path(rules_path)
+        self.rules: Dict[str, Dict[str, List[str]]] = self._load_rules()
+
+        # pre-normalise rule terms for fast look-ups
+        self.norm_rules: Dict[str, Dict[str, List[str]]] = {
+            diet: {
+                level: [_normalize(t) for t in terms]
+                for level, terms in grouping.items()
             }
+            for diet, grouping in self.rules.items()
         }
 
-    def normalize(self, text: str) -> str:
-        return unicodedata.normalize("NFKD", text).encode("ASCII", "ignore").decode("utf-8").lower()
+    def classify(
+        self,
+        ingredients: Iterable[str],
+        restriction: str | Iterable[str],
+    ) -> List[Dict[str, str]]:
 
-    def extract_ingredient_section(self, text: str) -> str:
-        lines = text.splitlines()
-        for i, line in enumerate(lines):
-            if "ingredient" in line.lower() or "içindekiler" in line.lower():
-                return " ".join(lines[i:])
-        return text
+        if isinstance(restriction, str): restrictions = [restriction]
+        else: restrictions = list(restriction)
 
-    def split_ingredients(self, text: str) -> List[str]:
-        text = text.replace("\n", ",").replace(";", ",")
-        parts = re.split(r",|\.", text)
-        return [self.normalize(p.strip()) for p in parts if len(p.strip()) > 1]
+        restrictions = [r for r in restrictions if r in self.norm_rules]
+        if not restrictions:
+            raise ValueError("Unknown dietary restriction(s)")
 
-    def classify(self, input_data: str | List[str], restriction: str) -> List[Dict[str, str]]:
-        if isinstance(input_data, list):
-            ingredients = [self.normalize(i) for i in input_data]
-        else:
-            extracted = self.extract_ingredient_section(input_data)
-            ingredients = self.split_ingredients(extracted)
+        verdicts: List[Dict[str, str]] = []
 
-        rule = self.rules.get(restriction, {})
-        all_known = rule.get("unsafe", []) + rule.get("maybe", []) + rule.get("safe", [])
-        all_known_normalized = [self.normalize(i) for i in all_known]
+        for raw in ingredients:
+            norm = _normalize(raw)
+            status = "safe"
 
-        classified = []
+            for r in restrictions:
+                unsafe_terms = self.norm_rules[r]["unsafe"]
+                maybe_terms = self.norm_rules[r]["maybe_unsafe"]
 
-        for item in ingredients:
-            label = "unknown"
-            if item in [self.normalize(i) for i in rule.get("unsafe", [])]:
-                label = "unsafe"
-            elif item in [self.normalize(i) for i in rule.get("maybe", [])]:
-                label = "maybe"
-            elif item in [self.normalize(i) for i in rule.get("safe", [])]:
-                label = "safe"
+                if self._matches(norm, unsafe_terms):
+                    status = "definitely unsafe"
+                    break
+                if status == "safe" and self._matches(norm, maybe_terms):
+                    status = "maybe unsafe"
+                    # keep checking; another diet might upgrade to unsafe
+
+            verdicts.append({"ingredient": raw, "status": status})
+
+        return verdicts
+
+    def _load_rules(self) -> Dict[str, Dict[str, List[str]]]:
+        with self.rules_path.open(encoding="utf-8") as fh:
+            return json.load(fh)
+
+    @staticmethod
+    def _matches(text: str, terms: List[str]) -> bool:
+        for term in terms:
+            if term.startswith("e") and term[1:].isdigit():
+                if term in text:
+                    return True
             else:
-                match = get_close_matches(item, all_known_normalized, n=1, cutoff=0.8)
-                if match:
-                    idx = all_known_normalized.index(match[0])
-                    matched_original = all_known[idx]
-                    if matched_original in rule["unsafe"]:
-                        label = "unsafe"
-                    elif matched_original in rule["maybe"]:
-                        label = "maybe"
-                    elif matched_original in rule["safe"]:
-                        label = "safe"
-
-            classified.append({"ingredient": item, "status": label})
-
-        return classified
+                if re.search(rf"\b{re.escape(term)}\b", text):
+                    return True
+        return False
