@@ -11,3 +11,4 @@ asyncpg
 python-jose[cryptography]
 bcrypt
 pydantic[email]
+PyJWT

@@ -1,61 +1,42 @@
 import 'package:flutter/material.dart';
 
+import 'history_page.dart';
 import 'scan_page.dart';
-import 'settings_page.dart';           // ← new detailed settings screen
+import 'settings_page.dart';
 import 'bottom_navbar.dart';
 import 'dietary_preferences_screen.dart';
 import '../services/prefs_service.dart';
 
-/// Stub until there's a history page
-class HistoryPage extends StatelessWidget {
-  const HistoryPage({super.key});
-
-  @override
-  Widget build(BuildContext context) =>
-      const Scaffold(body: Center(child: Text('History Page')));
-}
-
 class MainPage extends StatefulWidget {
   const MainPage({super.key});
-
   @override
   State<MainPage> createState() => _MainPageState();
 }
 
 class _MainPageState extends State<MainPage> {
-  int _selectedIndex = 1;            // start on Scan
+  int _idx = 1;
   final _prefs = PrefsService();
 
   @override
   void initState() {
     super.initState();
-    _maybeAskDiet();
+    _prefs.isSet().then((v) {
+      if (!v && mounted) {
+        Navigator.push(
+          context,
+          MaterialPageRoute(
+              builder: (_) => const DietaryPreferencesScreen()),
+        );
+      }
+    });
   }
 
-  Future<void> _maybeAskDiet() async {
-    if (!await _prefs.isSet()) {
-      if (!mounted) return;
-      await Navigator.push(
-        context,
-        MaterialPageRoute(builder: (_) => const DietaryPreferencesScreen()),
-      );
-    }
-  }
-
-  final List<Widget> _pages = const [
-    HistoryPage(),
-    ScanPage(),
-    SettingsPage(),
-  ];
-
-  void _onItemTapped(int idx) => setState(() => _selectedIndex = idx);
+  final _pages = const [HistoryPage(), ScanPage(), SettingsPage()];
 
   @override
   Widget build(BuildContext context) => Scaffold(
-        body: _pages[_selectedIndex],
-        bottomNavigationBar: BottomNavBar(
-          currentIndex: _selectedIndex,
-          onTap: _onItemTapped,
-        ),
+        body: _pages[_idx],
+        bottomNavigationBar:
+            BottomNavBar(currentIndex: _idx, onTap: (i) => setState(() => _idx = i)),
       );
 }

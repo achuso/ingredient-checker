@@ -1,14 +1,24 @@
-from jose import jwt
-from datetime import datetime, timedelta, timezone
-import os
+import os, jwt, datetime
+from fastapi import HTTPException, status
+from typing import Dict
 
-SECRET_KEY = os.getenv("SECRET_KEY", "totally-SAFE-secret-Key-8!kJ=~479")
-ALGORITHM = "HS256"
-ACCESS_TOKEN_EXPIRE_MINUTES = 60 * 24 * 7  # 7 days
+SECRET = os.getenv("SECRET_KEY", "totally-safe-secret-not-really-479")
+EXPIRY_MIN = int(os.getenv("JWT_MINUTES", "3000"))
 
-def create_access_token(data: dict) -> str:
-    to_encode = data.copy()
-    expire = datetime.now(timezone.utc) + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-    to_encode.update({"exp": expire})
-    encoded_jwt = jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)
-    return encoded_jwt
+def create_access_token(data: Dict) -> str:
+    to_encode = {
+        **data,
+        "exp": datetime.datetime.utcnow() + datetime.timedelta(minutes=EXPIRY_MIN),
+    }
+    return jwt.encode(to_encode, SECRET, algorithm="HS256")
+
+def verify_token(auth_header: str):
+    if not auth_header or not auth_header.startswith("Bearer "):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Missing token")
+    token = auth_header.split()[1]
+    try:
+        return jwt.decode(token, SECRET, algorithms=["HS256"])
+    except jwt.ExpiredSignatureError:
+        raise HTTPException(status_code=401, detail="Token expired")
+    except jwt.InvalidTokenError:
+        raise HTTPException(status_code=401, detail="Token invalid")

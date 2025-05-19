@@ -10,7 +10,7 @@ import '../services/prefs_service.dart';
 import 'result_page.dart';
 
 class ScanPage extends StatefulWidget {
-  const ScanPage({Key? key}) : super(key: key);
+  const ScanPage({super.key});
 
   @override
   State<ScanPage> createState() => _ScanPageState();
@@ -19,48 +19,57 @@ class ScanPage extends StatefulWidget {
 class _ScanPageState extends State<ScanPage> {
   final _prefs = PrefsService();
   List<String> _restrictions = [];
-
-  File? _selectedImage;
-  bool _loading = false;
+  File? _selected;
+  bool _busy = false;
 
   @override
   void initState() {
     super.initState();
-    _prefs.getRestrictions().then((r) => setState(() => _restrictions = r));
+    _prefs.getRestrictions().then((v) => setState(() => _restrictions = v));
   }
 
-  Future<void> _pickFromGallery() async {
-    final picker = ImagePicker();
-    final picked = await picker.pickImage(source: ImageSource.gallery);
-    if (picked != null) setState(() => _selectedImage = File(picked.path));
+  Future<void> _pick(ImageSource src) async {
+    final f = await ImagePicker().pickImage(source: src);
+    if (f != null) setState(() => _selected = File(f.path));
   }
 
-  String _statusOf(dynamic raw) {
-    if (raw is String) return raw;
-    if (raw is Map && raw['status'] is String) return raw['status'];
+  /* ---------- safe helpers ---------- */
+  String _statusOf(dynamic v) {
+    if (v is String) return v;
+    if (v is Map && v['status'] is String) return v['status'];
     return 'unknown';
   }
 
-  String _humanise(String s) => switch (s) {
-        'unsafe' => 'definitely unsafe',
-        'maybe' => 'maybe unsafe',
-        _ => s,
+  String _pretty(String raw) => switch (raw) {
+        'unsafe'  => 'definitely unsafe',
+        'maybe'   => 'maybe unsafe',
+        'unknown' => 'unknown',
+        'safe'    => 'safe',
+        _         => raw
       };
 
-  Future<void> _uploadAndAnalyze() async {
-    if (_selectedImage == null) return;
-    setState(() => _loading = true);
+  Map<String, String> _cast(dynamic node) {
+    if (node is Map) {
+      return {
+        for (final e in node.entries)
+          e.key.toString(): _pretty(_statusOf(e.value))
+      };
+    }
+    return {};
+  }
+
+  Future<void> _upload() async {
+    if (_selected == null) return;
+    setState(() => _busy = true);
 
     try {
-      // Upload
-      final img64 = base64Encode(await _selectedImage!.readAsBytes());
+      final img64 = base64Encode(await _selected!.readAsBytes());
       final up = await http.post(Uri.parse('$apiBaseUrl/analyze/upload'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({'image_base64': img64}));
       if (up.statusCode != 200) throw Exception('Upload failed');
       final s3 = jsonDecode(up.body)['s3_key'];
 
-      // Process
       final proc = await http.post(Uri.parse('$apiBaseUrl/analyze/process'),
           headers: {'Content-Type': 'application/json'},
           body: jsonEncode({
@@ -70,106 +79,100 @@ class _ScanPageState extends State<ScanPage> {
           }));
       if (proc.statusCode != 200) throw Exception('Process failed');
       if (!mounted) return;
-      setState(() => _loading = false);
+      setState(() => _busy = false);
 
-      // Parsing response
-      final data = jsonDecode(proc.body);
-      final classified = (data['classified'] ?? {}) as Map;
-      final ingSrc = (classified['ingredients'] ?? {}) as Map<String, dynamic>;
-      final trcSrc = (classified['traces'] ?? {}) as Map<String, dynamic>;
+      final json = jsonDecode(proc.body) as Map<String, dynamic>;
+      final verdictRaw = _statusOf(json['verdict']);
+      final cls = json['classified'] ?? {};
+      final ingredients = _cast((cls as Map<String, dynamic>)['ingredients']);
+      final traces = _cast(cls['traces']);
 
-      final ingredients = {
-        for (final e in ingSrc.entries) e.key: _humanise(_statusOf(e.value))
-      };
-      final traces = {
-        for (final e in trcSrc.entries) e.key: _humanise(_statusOf(e.value))
-      };
-
-      // Compute verdict
-      String verdict;
-      if (ingredients.values.any((s) => s.contains('definitely'))) {
-        verdict = 'definitely unsafe';
-      } 
-      else if (ingredients.values.any((s) => s.contains('maybe'))) {
-        verdict = 'maybe unsafe';
-      } 
-      else if (traces.values.any((s) => !s.contains('safe'))) {
-        verdict = 'unsafe traces';
-      } 
-      else {
-        verdict = 'safe';
-      }
+      final verdict = verdictRaw != 'unknown'
+          ? _pretty(verdictRaw)
+          : ingredients.values.any((v) => v.contains('definitely'))
+              ? 'definitely unsafe'
+              : ingredients.values.any((v) => v.contains('maybe'))
+                  ? 'maybe unsafe'
+                  : traces.values.any((v) => !v.contains('safe'))
+                      ? 'unsafe traces'
+                      : 'safe';
 
       Navigator.push(
-        context,
-        MaterialPageRoute(
-          builder: (_) => ResultPage(
-            verdict: verdict,
-            ingredients: ingredients,
-            traces: traces,
-          ),
-        ),
-      );
-    } 
-    catch (e) {
+          context,
+          MaterialPageRoute(
+              builder: (_) => ResultPage(
+                  verdict: verdict,
+                  ingredients: ingredients,
+                  traces: traces)));
+    } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-          SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
-        );
+            SnackBar(content: Text(e.toString()), backgroundColor: Colors.red));
       }
-      setState(() => _loading = false);
+      setState(() => _busy = false);
     }
   }
 
-  // UI Helpers
-  Widget _btn(String txt, IconData ic, VoidCallback tap) => ElevatedButton.icon(
-        onPressed: tap,
-        icon: Icon(ic, size: 20),
-        label: Text(txt),
-        style: ElevatedButton.styleFrom(
-          backgroundColor: const Color(0xFF1D4ED8),
-          foregroundColor: Colors.white,
-          padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-          shape:
-              RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
-        ),
-      );
+  /* ---------- UI helpers ---------- */
+  Widget _btn(String label, IconData icon, VoidCallback tap) {
+    final primary = Theme.of(context).colorScheme.primary;
+    return ElevatedButton.icon(
+      onPressed: tap,
+      icon: Icon(icon, size: 20),
+      label: Text(label),
+      style: ElevatedButton.styleFrom(
+        backgroundColor: primary,
+        foregroundColor: Colors.white,
+        padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
+        shape:
+            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+      ),
+    );
+  }
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        backgroundColor: const Color(0xFFFCFAFF),
-        body: Center(
-          child: SingleChildScrollView(
-            padding: const EdgeInsets.symmetric(horizontal: 32),
-            child: Column(
-              mainAxisAlignment: MainAxisAlignment.center,
-              children: [
-                const Icon(Icons.camera_alt_outlined,
-                    size: 120, color: Color(0xFF1D4ED8)),
-                const SizedBox(height: 32),
-                const Text('Take a photo\nor upload from gallery',
-                    textAlign: TextAlign.center,
-                    style:
-                        TextStyle(fontSize: 22, fontWeight: FontWeight.w600)),
-                const SizedBox(height: 40),
-                _btn('Gallery', Icons.photo_library, _pickFromGallery),
-                const SizedBox(height: 40),
-                if (_selectedImage != null)
-                  ClipRRect(
-                      borderRadius: BorderRadius.circular(12),
-                      child: Image.file(_selectedImage!, height: 220)),
-                if (_selectedImage != null && !_loading) ...[
-                  const SizedBox(height: 24),
-                  _btn('Upload & analyze', Icons.cloud_upload_outlined,
-                      _uploadAndAnalyze),
+  Widget build(BuildContext ctx) {
+    final primary = Theme.of(ctx).colorScheme.primary;
+    return Scaffold(
+      backgroundColor: const Color(0xFFFCFAFF),
+      body: Center(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.symmetric(horizontal: 32),
+          child: Column(
+            children: [
+              Icon(Icons.camera_alt_outlined, size: 120, color: primary),
+              const SizedBox(height: 16),
+              const Text('Snap or pick a product label',
+                  textAlign: TextAlign.center,
+                  style:
+                      TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
+              const SizedBox(height: 28),
+              Row(
+                mainAxisAlignment: MainAxisAlignment.center,
+                children: [
+                  _btn('Camera', Icons.camera_alt,
+                      () => _pick(ImageSource.camera)),
+                  const SizedBox(width: 18),
+                  _btn('Gallery', Icons.photo,
+                      () => _pick(ImageSource.gallery)),
                 ],
-                if (_loading) ...[
-                  const SizedBox(height: 32),
-                  const CircularProgressIndicator(),
-                ],
+              ),
+              if (_selected != null) ...[
+                const SizedBox(height: 28),
+                ClipRRect(
+                    borderRadius: BorderRadius.circular(12),
+                    child: Image.file(_selected!, height: 220)),
+                const SizedBox(height: 24),
+                _btn('Upload & analyze', Icons.cloud_upload, _upload),
               ],
-            ),
+              if (_busy) ...[
+                const SizedBox(height: 32),
+                const CircularProgressIndicator(),
+              ],
+            ],
           ),
         ),
-      );
+      ),
+    );
+  }
 }
