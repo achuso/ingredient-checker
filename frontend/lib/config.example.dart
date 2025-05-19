@@ -1,0 +1,1 @@
+const String apiBaseUrl = 'https://something.com/api';
