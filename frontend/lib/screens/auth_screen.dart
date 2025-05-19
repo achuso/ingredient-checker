@@ -1,7 +1,10 @@
 import 'dart:convert';
+
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
+
 import '../config.dart';
+import '../services/auth_service.dart';
 import 'main_page.dart';
 
 class AuthScreen extends StatefulWidget {
@@ -12,170 +15,105 @@ class AuthScreen extends StatefulWidget {
 }
 
 class _AuthScreenState extends State<AuthScreen> {
-  bool isLogin = true;
-  bool isButtonEnabled = false;
-  bool isLoading = false;
+  final _formKey = GlobalKey<FormState>();
+  bool _isLogin = true;
+  bool _loading = false;
+  String _email = '', _password = '', _confirm = '';
 
-  final emailController = TextEditingController();
-  final passwordController = TextEditingController();
-  final confirmPasswordController = TextEditingController();
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+    _formKey.currentState!.save();
 
-  @override
-  void initState() {
-    super.initState();
-    emailController.addListener(_validateForm);
-    passwordController.addListener(_validateForm);
-    confirmPasswordController.addListener(_validateForm);
-  }
-
-  void _validateForm() {
-    final email = emailController.text.trim();
-    final password = passwordController.text.trim();
-    final confirm = confirmPasswordController.text.trim();
-
-    setState(() {
-      isButtonEnabled = isLogin
-          ? email.isNotEmpty && password.isNotEmpty
-          : email.isNotEmpty && password.isNotEmpty && confirm.isNotEmpty;
-    });
-  }
-
-  Future<void> _loginUser() async {
-    final email = emailController.text.trim();
-    final password = passwordController.text.trim();
-    
-    final loginUrl = isLogin ? '$apiBaseUrl/auth/login' : '$apiBaseUrl/auth/register';
-
-
-    setState(() => isLoading = true);
-
-    await Future.delayed(Duration.zero);
+    setState(() => _loading = true);
 
     try {
-      final response = await http.post(
-        Uri.parse(loginUrl),
+      final endpoint = _isLogin ? '/auth/login' : '/auth/register';
+      final resp = await http.post(
+        Uri.parse('$apiBaseUrl$endpoint'),
         headers: {'Content-Type': 'application/json'},
-        body: jsonEncode({'email': email, 'password': password}),
+        body: jsonEncode({'email': _email, 'password': _password}),
       );
 
-      if (response.statusCode == 200) {
-        Navigator.pushReplacement(
-          context,
-          MaterialPageRoute(builder: (context) => MainPage()),
-        );
-      } else {
-        final errMsg = jsonDecode(response.body)['message'] ?? 'Login failed';
-        _showError(errMsg);
+      if (resp.statusCode != 200 && resp.statusCode != 201) {
+        throw Exception(jsonDecode(resp.body)['message'] ?? 'Auth failed');
       }
-    } catch (e) {
-      _showError('Network error. Please try again.');
-    } finally {
-      setState(() => isLoading = false);
-    }
-  }
 
-  void _showError(String message) {
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text(message), backgroundColor: Colors.red),
-    );
+      final tokenString =
+          jsonDecode(resp.body)['access_token'] ?? jsonDecode(resp.body)['token'];
+      await AuthService().saveToken(tokenString);
+
+      if (!mounted) return;
+      Navigator.pushReplacement(
+          context, MaterialPageRoute(builder: (_) => MainPage()));
+    } catch (e) {
+      ScaffoldMessenger.of(context).showSnackBar(
+        SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
+      );
+    } finally {
+      if (mounted) setState(() => _loading = false);
+    }
   }
 
   @override
   Widget build(BuildContext context) {
     return Scaffold(
-      backgroundColor: const Color(0xFFFCFAFF),
-      appBar: AppBar(
-        backgroundColor: Colors.transparent,
-        foregroundColor: Colors.black,
-        elevation: 0,
-        title: Text(isLogin ? 'Log In' : 'Register'),
-        centerTitle: true,
-      ),
       body: Center(
         child: SingleChildScrollView(
-          padding: const EdgeInsets.symmetric(horizontal: 32),
-          child: Column(
-            mainAxisAlignment: MainAxisAlignment.center,
-            children: [
-              _buildInputField(emailController, 'Email'),
-              const SizedBox(height: 16),
-              _buildInputField(passwordController, 'Password', obscure: true),
-              if (!isLogin) ...[
+          padding: const EdgeInsets.all(32),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              children: [
+                Text(_isLogin ? 'Log in' : 'Register',
+                    style:
+                        const TextStyle(fontSize: 28, fontWeight: FontWeight.w700)),
+                const SizedBox(height: 32),
+                TextFormField(
+                  key: const ValueKey('email'),
+                  decoration: const InputDecoration(labelText: 'E-mail'),
+                  keyboardType: TextInputType.emailAddress,
+                  onSaved: (v) => _email = v!.trim(),
+                  validator: (v) =>
+                      v != null && v.contains('@') ? null : 'Enter a valid email',
+                ),
                 const SizedBox(height: 16),
-                _buildInputField(confirmPasswordController, 'Confirm password', obscure: true),
-              ],
-              const SizedBox(height: 32),
-              SizedBox(
-                width: double.infinity,
-                child: TextButton(
-                  onPressed: isButtonEnabled && !isLoading
-                      ? () {
-                          if (isLogin) {
-                            _loginUser();
-                          }
-                        }
-                      : null,
-                  style: TextButton.styleFrom(
-                    backgroundColor: isButtonEnabled
-                        ? const Color(0xFF1D4ED8)
-                        : const Color(0xFFE0E0E0),
-                    padding: const EdgeInsets.symmetric(vertical: 16),
-                    shape: RoundedRectangleBorder(
-                      borderRadius: BorderRadius.circular(14),
-                    ),
+                TextFormField(
+                  key: const ValueKey('pw'),
+                  decoration: const InputDecoration(labelText: 'Password'),
+                  obscureText: true,
+                  onSaved: (v) => _password = v!,
+                  validator: (v) =>
+                      (v != null && v.length >= 6) ? null : 'Min 6 chars',
+                ),
+                if (!_isLogin) ...[
+                  const SizedBox(height: 16),
+                  TextFormField(
+                    key: const ValueKey('pw2'),
+                    decoration:
+                        const InputDecoration(labelText: 'Confirm password'),
+                    obscureText: true,
+                    onSaved: (v) => _confirm = v!,
+                    validator: (v) => v == _password ? null : 'Passwords differ',
                   ),
-                  child: isLoading
-                      ? const SizedBox(
-                          height: 20,
-                          width: 20,
-                          child: CircularProgressIndicator(strokeWidth: 2, color: Colors.white),
-                        )
-                      : Text(
-                          isLogin ? 'Log in' : 'Register',
-                          style: TextStyle(
-                            fontSize: 16,
-                            color: isButtonEnabled ? Colors.white : Colors.grey.shade600,
-                            fontWeight: FontWeight.w500,
-                          ),
-                        ),
-                ),
-              ),
-              TextButton(
-                onPressed: () {
-                  setState(() {
-                    isLogin = !isLogin;
-                    _validateForm();
-                  });
-                },
-                child: Text(
-                  isLogin
-                      ? "Don't have an account? Register"
-                      : "Already have an account? Log in",
-                  style: const TextStyle(color: Color(0xFF1D4ED8)),
-                ),
-              )
-            ],
+                ],
+                const SizedBox(height: 32),
+                _loading
+                    ? const CircularProgressIndicator()
+                    : FilledButton(
+                        onPressed: _submit,
+                        child: Text(_isLogin ? 'Log in' : 'Create account'),
+                      ),
+                TextButton(
+                  onPressed: () => setState(() => _isLogin = !_isLogin),
+                  child: Text(_isLogin
+                      ? 'Need an account? Register'
+                      : 'Already have an account? Log in'),
+                )
+              ],
+            ),
           ),
         ),
       ),
     );
   }
-
-  Widget _buildInputField(TextEditingController controller, String label,
-      {bool obscure = false}) {
-    return TextField(
-      controller: controller,
-      obscureText: obscure,
-      decoration: InputDecoration(
-        labelText: label,
-        filled: true,
-        fillColor: Colors.white,
-        contentPadding: const EdgeInsets.symmetric(vertical: 18, horizontal: 16),
-        border: OutlineInputBorder(
-          borderRadius: BorderRadius.circular(14),
-        ),
-      ),
-    );
-  }
 }
-
