@@ -1,0 +1,70 @@
+{
+  "celiac": {
+    "unsafe": [
+      "arpa",
+      "buğday",
+      "çavdar",
+      "yulaf",
+      "tritikale",
+      "gluten",
+      "malt"
+    ],
+    "maybe_unsafe": [
+      "nişasta",
+      "modifiye nişasta",
+      "E1404",     "oksitlenmiş nişasta",
+      "E1412",     "distarch fosfat",
+      "E1414",     "asetillenmiş distarch fosfat",
+      "E1420",     "asetillenmiş nişasta",
+      "E1422",     "asetillenmiş distarch adipat"
+    ]
+  },
+
+  "vegan": {
+    "unsafe": [
+      "jelatin",
+      "bal",
+      "yumurta",
+      "süt",
+      "peynir",
+      "tereyağı",
+      "balık yağı",
+      "balmumu",                "E901",
+      "karmin",                 "E120",
+      "jelatin",                "E441",
+      "kemik fosfat",           "E542",
+      "şellak",                 "E904",
+      "L-sistein",              "E910", "E920", "E921",
+      "lanolin",                "E913",
+      "laktitol",               "E966"
+    ],
+    "maybe_unsafe": [
+      "lesitin",                "E322",
+      "emülgatör",              "mono ve digliseritler", "E471",
+      "E472",                   "yağ asidi esterleri",
+      "E470a", "E470b",
+      "E473", "E474", "E475", "E476", "E477", "E478",
+      "E479b",
+      "E481", "E482", "E483",
+      "E491", "E492", "E493", "E494", "E495",
+      "modifiye nişasta",
+      "gliserin",
+      "doğal aroma",
+      "renklendirici"
+    ]
+  },
+
+  "nut_allergy": {
+    "unsafe": [
+      "badem",
+      "fındık",
+      "ceviz",
+      "fıstık",
+      "antep fıstığı",
+      "kaju",
+      "makadamya",
+      "pecan"
+    ],
+    "maybe_unsafe": []
+  }
+}
