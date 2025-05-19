@@ -2,6 +2,7 @@ import 'package:flutter/material.dart';
 import 'screens/welcome_screen.dart';
 import 'screens/auth_screen.dart';
 
+
 void main() {
   WidgetsFlutterBinding.ensureInitialized();
   runApp(const IngredientCheckerApp());
