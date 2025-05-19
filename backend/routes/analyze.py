@@ -1,6 +1,7 @@
 from fastapi import APIRouter, HTTPException
 from pydantic import BaseModel
 from fastapi.concurrency import run_in_threadpool
+from typing import List, Union
 
 from services.analyze.upload.upload_service import UploadService
 from services.analyze.process.ocr_service import OCRService
@@ -20,7 +21,7 @@ class UploadRequest(BaseModel):
 
 class AnalyzeRequest(BaseModel):
     s3_key: str
-    restriction: str
+    restriction: Union[str, List[str]]
 
 @router.post("/upload")
 async def upload_image(data: UploadRequest):
