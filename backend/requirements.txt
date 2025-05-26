@@ -5,10 +5,10 @@ boto3
 filetype
 Pillow
 piexif
-#opencv-python-headless
-#numpy
 asyncpg
 python-jose[cryptography]
 bcrypt
 pydantic[email]
 PyJWT
+flashtext==2.7
+rapidfuzz==3.6.2
