@@ -1,7 +1,8 @@
-from fastapi import APIRouter, HTTPException
+from fastapi import APIRouter, HTTPException, Depends
 from pydantic import BaseModel, Field
+from typing import List, Literal, Dict
 from fastapi.concurrency import run_in_threadpool
-from typing import List, Union, Literal, Dict
+from sqlalchemy.ext.asyncio import AsyncSession
 import logging
 
 from services.analyze.upload.upload_service import UploadService
@@ -9,62 +10,98 @@ from services.analyze.process.ocr_service import OCRService
 from services.analyze.process.classification_service import ClassificationService
 from services.analyze.process.llm_service import LLMService
 
+from services.db_conn import get_db
+from services.scans.scans import persist_scan
+from services.auth.auth_service import get_current_user
+from services.models import ScanVerdictEnum, User as UserModel
+
 router = APIRouter(prefix="/analyze", tags=["analyze"])
 logger = logging.getLogger(__name__)
 
-# singletons
-_upload  = UploadService()
-_ocr     = OCRService()
-_rules   = ClassificationService()
-_llm     = LLMService()
+# Singletons for upload/OCR/classification
+_upload = UploadService()
+_ocr = OCRService()
+_rules = ClassificationService()
+_llm = LLMService()
 
-class UploadRequest(BaseModel):
-    image_base64: str
 
 class AnalyzeRequest(BaseModel):
-    s3_key: str
-    restriction: Union[str, List[str]]
-    method: Literal["rule", "llm"] = Field("rule", description="Processing engine to use")
-
-# routes
-@router.post("/upload")
-async def upload_image(data: UploadRequest):
-    try:
-        key = await run_in_threadpool(_upload.upload_base64_image, data.image_base64)
-        return {"s3_key": key}
-    except Exception as e:
-        logger.error("upload_image failed: %s", e, exc_info=True)
-        raise HTTPException(500, "Failed to upload image.")
+    image_base64: str
+    restriction_ids: List[str]
+    method: Literal["rule", "llm"] = Field(
+        "rule", description="Processing engine to use"
+    )
 
 
 @router.post("/process")
-async def process_image(data: AnalyzeRequest):
-    restrictions = [data.restriction] if isinstance(data.restriction, str) else data.restriction
+async def process_scan(
+    data: AnalyzeRequest,
+    db: AsyncSession = Depends(get_db),
+    current_user: UserModel = Depends(get_current_user),
+):
+    """
+    1) Uploads the base64 image to S3
+    2) Runs OCR + rule-based or LLM-based classification
+    3) Persists the new scan into the database (scans, scan_dietary_restrictions, scan_ingredients)
+    4) Returns scan_id, s3_image_url, final_verdict, and the raw classification result
+    """
 
-    #  LLM‑based alternative
-    if data.method == "llm":
-        try:
-            raw_text = await run_in_threadpool(_ocr.extract_text, data.s3_key)
-            llm_result: Dict = await run_in_threadpool(_llm.classify_from_ocr_text, raw_text, restrictions)
-            return {"s3_key": data.s3_key, "classified": llm_result}
-        except Exception as e:
-            logger.error("Bedrock LLM failed: %s", e, exc_info=True)
-            raise HTTPException(502, "LLM processing failed.")
-
-    # deterministic pipeline
+    # ---- 1) Upload image to S3 ----
     try:
-        parsed = await run_in_threadpool(_ocr.extract_ingredients_from_s3, data.s3_key)
-        ingredients, traces = parsed["ingredients"], parsed["traces"]
+        s3_key = await run_in_threadpool(_upload.upload_base64_image, data.image_base64)
+    except Exception as e:
+        logger.error("upload failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to upload image.")
 
-        cls_ing = await run_in_threadpool(_rules.classify_ingredients, ingredients, restrictions)
-        cls_tr  = await run_in_threadpool(_rules.classify_ingredients, traces, restrictions)
+    # ---- 2) Run classification ----
+    restrictions = data.restriction_ids
+    try:
+        if data.method == "llm":
+            raw_text = await run_in_threadpool(_ocr.extract_text, s3_key)
+            classified_dict: Dict = await run_in_threadpool(
+                _llm.classify_from_ocr_text, raw_text, restrictions
+            )
 
-        result = {
-            "ingredients": {c["ingredient"]: {"status": c["status"]} for c in cls_ing},
-            "traces":      {c["ingredient"]: {"status": c["status"]} for c in cls_tr},
-        }
-        return {"s3_key": data.s3_key, "classified": result}
+            # Expecting LLMService to return something like:
+            #    { "ingredients": [{"ingredient": "...", "status": "safe"}, ...],
+            #      "traces":      [{"ingredient": "...", "status": "potentially unsafe"}, ...] }
+            cls_ing = classified_dict.get("ingredients", [])
+            cls_tr = classified_dict.get("traces", [])
+
+        else:
+            parsed = await run_in_threadpool(_ocr.extract_ingredients_from_s3, s3_key)
+            cls_ing = await run_in_threadpool(
+                _rules.classify_ingredients, parsed["ingredients"], restrictions
+            )
+            cls_tr = await run_in_threadpool(
+                _rules.classify_ingredients, parsed["traces"], restrictions
+            )
 
     except Exception as e:
-        logger.error("rule‑based processing failed: %s", e, exc_info=True)
-        raise HTTPException(500, "Failed to analyze image.")
+        logger.error("classification failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to classify image.")
+
+    # ---- 3) Persist into the database ----
+    try:
+        new_scan = await persist_scan(
+            db=db,
+            user_id=current_user.user_id,
+            s3_image_url=s3_key,
+            restriction_ids=restrictions,
+            ingredients=cls_ing,
+            traces=cls_tr,
+        )
+    except Exception as e:
+        logger.error("DB persistence failed: %s", e, exc_info=True)
+        raise HTTPException(status_code=500, detail="Failed to save scan.")
+
+    # ---- 4) Return the response ----
+    return {
+        "scan_id": new_scan.scan_id,
+        "s3_image_url": new_scan.s3_image_url,
+        "final_verdict": new_scan.final_verdict.value,
+        "classified": {
+            "ingredients": {c["ingredient"]: {"status": c["status"]} for c in cls_ing},
+            "traces": {c["ingredient"]: {"status": c["status"]} for c in cls_tr},
+        },
+    }

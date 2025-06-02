@@ -6,6 +6,7 @@ filetype
 Pillow
 piexif
 asyncpg
+SQLAlchemy
 python-jose[cryptography]
 bcrypt
 pydantic[email]
