@@ -2,3 +2,5 @@
 lambda_build/
 *.zip
 .env
+*.pyc
+__pycache__/
