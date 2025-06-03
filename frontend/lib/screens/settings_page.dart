@@ -14,28 +14,12 @@ class SettingsPage extends StatefulWidget {
 
 class _SettingsPageState extends State<SettingsPage> {
   final _prefs = PrefsService();
+  String _method = 'rule';                     // rule | llm
 
-  Future<void> _openDietPrefs() async {
-    await Navigator.push(
-      context,
-      MaterialPageRoute(builder: (_) => const DietaryPreferencesScreen()),
-    );
-    if (!mounted) return;
-    final list = await _prefs.getRestrictions();
-    final txt = list.isEmpty ? 'None' : list.join(', ');
-    ScaffoldMessenger.of(context).showSnackBar(
-      SnackBar(content: Text('Saved: $txt')),
-    );
-  }
-
-  Future<void> _logout() async {
-    await AuthService().logout();
-    if (!mounted) return;
-    Navigator.pushAndRemoveUntil(
-      context,
-      MaterialPageRoute(builder: (_) => const WelcomeScreen()),
-      (_) => false,
-    );
+  @override
+  void initState() {
+    super.initState();
+    _prefs.getMethod().then((v) => setState(() => _method = v));
   }
 
   @override
@@ -46,18 +30,68 @@ class _SettingsPageState extends State<SettingsPage> {
         children: [
           ListTile(
             leading: const Icon(Icons.restaurant_menu_outlined),
-            title: const Text('Dietary preference'),
+            title : const Text('Dietary preference'),
             subtitle: const Text('Vegan, celiac, nut allergy …'),
-            onTap: _openDietPrefs,
+            onTap : _openDietPrefs,
+          ),
+          const Divider(height: 0),
+          ListTile(
+            leading : const Icon(Icons.memory),
+            title   : const Text('Analysis method'),
+            subtitle: Text(_method == 'llm' ? 'LLM-based' : 'Rule-based'),
+            onTap   : _chooseMethod,
           ),
           const Divider(height: 0),
           ListTile(
             leading: const Icon(Icons.logout),
-            title: const Text('Log out'),
-            onTap: _logout,
+            title : const Text('Log out'),
+            onTap : _logout,
           ),
         ],
       ),
+    );
+  }
+
+  /* ───────────── helpers ───────────── */
+  void _openDietPrefs() => Navigator.push(
+        context,
+        MaterialPageRoute(builder: (_) => const DietaryPreferencesScreen()),
+      );
+
+  Future<void> _chooseMethod() async {
+    final sel = await showDialog<String>(
+      context: context,
+      builder: (_) => SimpleDialog(
+        title: const Text('Choose analysis method'),
+        children: [
+          RadioListTile(
+            title: const Text('Rule-based'),
+            value: 'rule',
+            groupValue: _method,
+            onChanged: (v) => Navigator.pop(context, v),
+          ),
+          RadioListTile(
+            title: const Text('LLM-based'),
+            value: 'llm',
+            groupValue: _method,
+            onChanged: (v) => Navigator.pop(context, v),
+          ),
+        ],
+      ),
+    );
+    if (sel != null && sel != _method) {
+      await _prefs.setMethod(sel);
+      setState(() => _method = sel);
+    }
+  }
+
+  Future<void> _logout() async {
+    await AuthService().logout();
+    if (!mounted) return;
+    Navigator.pushAndRemoveUntil(
+      context,
+      MaterialPageRoute(builder: (_) => const WelcomeScreen()),
+      (_) => false,
     );
   }
 }

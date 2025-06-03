@@ -1,7 +1,7 @@
 import 'package:shared_preferences/shared_preferences.dart';
 
 class PrefsService {
-  /* ─────────────── dietary restrictions ─────────────── */
+  /* ──────────────  dietary restrictions  ────────────── */
   static const _dietKey = 'dietary_restrictions';
 
   Future<List<String>> getRestrictions() async {
@@ -14,15 +14,14 @@ class PrefsService {
     await prefs.setStringList(_dietKey, values);
   }
 
-  /// **Restores the old helper:** returns `true`
-  /// if the user has picked at least one restriction.
+  /// `true` ⇢ at least one restriction already chosen
   Future<bool> isSet() async {
     final prefs = await SharedPreferences.getInstance();
     return (prefs.getStringList(_dietKey)?.isNotEmpty ?? false);
   }
 
-  /* ─────────────── analysis method pref ─────────────── */
-  // "rule"  = rule-based  ·  "llm" = GPT/LLM
+  /* ───────────────  analysis-method pref  ─────────────── */
+  // 'rule'  = rule-based  ·  'llm' = GPT / LLM
   static const _methodKey = 'analysis_method';
 
   Future<String> getMethod() async {
@@ -33,5 +32,10 @@ class PrefsService {
   Future<void> setMethod(String value) async {
     final prefs = await SharedPreferences.getInstance();
     await prefs.setString(_methodKey, value);
+  }
+
+  Future<bool> isMethodSet() async {
+    final prefs = await SharedPreferences.getInstance();
+    return prefs.containsKey(_methodKey);
   }
 }

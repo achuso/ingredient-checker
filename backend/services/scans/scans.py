@@ -1,6 +1,6 @@
 """services/scans/scans.py – unified persistence helpers (async/asyncpg)
-Fixed syntax error (extra comma + parenthesis) in `_lookup_restriction_uuid`.
-Handles UUID vs label for dietary-restriction links.
+
+Adds JOIN to return human-readable dietary-restriction *names* alongside UUIDs.
 """
 from __future__ import annotations
 
@@ -14,13 +14,13 @@ from fastapi import HTTPException
 from services.db_conn import Database
 
 # ─────────── Table / column aliases ───────────
-INGR_TABLE = "scan_ingredients"
-INGR_COL_ING = "ingredient_name"  # column in schema
-INGR_COL_STATUS = "verdict"
+INGR_TABLE       = "scan_ingredients"
+INGR_COL_ING     = "ingredient_name"
+INGR_COL_STATUS  = "verdict"
 
-DIET_TABLE = "scan_dietary_restrictions"      # link table
-DIET_REF_TABLE = "dietary_restrictions"       # lookup table with UUID PK + name
-DIET_COL = "restriction_id"
+DIET_TABLE       = "scan_dietary_restrictions"   # link (scan_id ↔ restriction_id)
+DIET_REF_TABLE   = "dietary_restrictions"        # master list: restriction_id + name
+DIET_COL         = "restriction_id"
 
 UUID_RE = re.compile(r"^[0-9a-fA-F-]{32,36}$")
 
@@ -28,14 +28,11 @@ UUID_RE = re.compile(r"^[0-9a-fA-F-]{32,36}$")
 async def _lookup_restriction_uuid(db: Database, code_or_uuid: str) -> str | None:
     """Return the UUID of a dietary restriction.
 
-    * If `code_or_uuid` already looks like a UUID (32–36 hex chars ± dashes),
-      return it directly.
-    * Otherwise treat it as the **human‑readable label** (vegan / celiac /
-      nut_allergy) and look up the corresponding UUID from
-      `dietary_restrictions`.
+    * If `code_or_uuid` already looks like a UUID, return it.
+    * Else treat it as the human label (vegan / celiac …) and look it up.
     """
     if UUID_RE.fullmatch(code_or_uuid):
-        return code_or_uuid  # already a UUID string
+        return code_or_uuid
 
     row = await db.fetchrow(
         f"SELECT {DIET_COL} FROM {DIET_REF_TABLE} WHERE name = $1",
@@ -52,15 +49,14 @@ async def persist_scan(
     restriction_ids: Iterable[str] | None,
     ingredients: Iterable[Mapping[str, Any]],
 ) -> Dict[str, Any]:
-    """Insert a scan + its relations; returns the inserted scan row."""
-
+    """Insert scan + relations; returns inserted scan row."""
     scan_id = str(_uuid.uuid4())
     now = _dt.datetime.utcnow()
 
     db = Database()
     await db.connect()
     try:
-        # 1) main row
+        # 1) main row ---------------------------------------------------
         row = await db.fetchrow(
             """
             INSERT INTO scans (scan_id, user_id, s3_image_url, final_verdict, scanned_at)
@@ -74,20 +70,20 @@ async def persist_scan(
             now,
         )
 
-        # 2) dietary restrictions link rows
+        # 2) diet links -------------------------------------------------
         if restriction_ids:
             for rid in restriction_ids:
                 uuid_val = await _lookup_restriction_uuid(db, str(rid))
                 if uuid_val is None:
                     print(f"[WARN] Unknown dietary restriction label/UUID: {rid}")
-                    continue  # skip unknowns instead of failing whole request
+                    continue
                 await db.execute(
                     f"INSERT INTO {DIET_TABLE} (scan_id, {DIET_COL}) VALUES ($1, $2)",
                     scan_id,
                     uuid_val,
                 )
 
-        # 3) ingredient rows
+        # 3) ingredient rows -------------------------------------------
         for item in ingredients:
             await db.execute(
                 f"""
@@ -124,6 +120,7 @@ async def get_scan_history(user_id: str) -> List[Dict[str, Any]]:
 
 # ──────────────────────────────────────────────
 async def get_scan_details(user_id: str, scan_id: str) -> Dict[str, Any]:
+    """Return one scan incl. ingredient list and BOTH restriction ids + names."""
     db = Database()
     await db.connect()
     try:
@@ -151,15 +148,22 @@ async def get_scan_details(user_id: str, scan_id: str) -> Dict[str, Any]:
             scan_id,
         )
 
+        # ─── diet look-up: join to master for readable names ───
         diet_rows = await db.fetch(
-            f"SELECT {DIET_COL} FROM {DIET_TABLE} WHERE scan_id = $1",
+            f"""
+            SELECT dr.{DIET_COL} AS id, dr.name
+            FROM {DIET_TABLE} sd
+            JOIN {DIET_REF_TABLE} dr ON dr.{DIET_COL} = sd.{DIET_COL}
+            WHERE sd.scan_id = $1
+            """,
             scan_id,
         )
 
         return {
             **dict(scan),
             "ingredients": [dict(r) for r in ing_rows],
-            "restriction_ids": [r[DIET_COL] for r in diet_rows],
+            "restriction_ids": [r["id"] for r in diet_rows],
+            "restrictions": [r["name"] for r in diet_rows],  # ← NEW human names
         }
     finally:
         await db.close()

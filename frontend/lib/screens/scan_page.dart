@@ -111,6 +111,7 @@ class _ScanPageState extends State<ScanPage> {
             verdict: verdict,
             ingredients: ingredients,
             traces: traces,
+            restrictions : _restrictions,
           ),
         ),
       );

@@ -2,15 +2,14 @@ import 'dart:convert';
 
 import 'package:flutter/material.dart';
 import 'package:http/http.dart' as http;
-import 'package:cached_network_image/cached_network_image.dart';
 import 'package:intl/intl.dart';
 
 import '../config.dart';
 import '../services/auth_service.dart';
+import '../services/prefs_service.dart';
 import 'result_page.dart';
 
-/// Lists previous scans for the logged‑in user. Pulls data from `GET /scans`.
-/// Shows S3 thumbnail (if any) and verdict.
+/// Lists previous scans for the logged-in user (GET /scans).
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
 
@@ -19,7 +18,7 @@ class HistoryPage extends StatefulWidget {
 }
 
 class _HistoryPageState extends State<HistoryPage> {
-  final _auth = AuthService();
+  final _auth  = AuthService();
   late Future<List<_Scan>> _future;
 
   @override
@@ -73,14 +72,20 @@ class _HistoryPageState extends State<HistoryPage> {
       }
     }
 
+    // ⬇️  use *server-side* restrictions stored with this scan
+    final restrictions = List<String>.from(
+      detail['restrictions'] ?? detail['restriction_ids'] ?? const [],
+    );
+
     if (!mounted) return;
     Navigator.push(
       context,
       MaterialPageRoute(
         builder: (_) => ResultPage(
-          verdict: detail['final_verdict'] as String? ?? 'unknown',
-          ingredients: ing,
-          traces: trc,
+          verdict      : detail['final_verdict'] as String? ?? 'unknown',
+          ingredients  : ing,
+          traces       : trc,
+          restrictions : restrictions,
         ),
       ),
     );
@@ -109,23 +114,16 @@ class _HistoryPageState extends State<HistoryPage> {
             itemBuilder: (context, i) {
               final s = list[i];
               return ListTile(
-                leading: s.imageUrl != null
-                    ? CachedNetworkImage(
-                        imageUrl: s.imageUrl!,
-                        width: 56,
-                        height: 56,
-                        fit: BoxFit.cover,
-                        placeholder: (_, __) => const Icon(Icons.image),
-                        errorWidget: (_, __, ___) => const Icon(Icons.broken_image),
-                      )
-                    : const Icon(Icons.image),
-                title: Text(
-                  s.scannedAt != null ? DateFormat('dd.MM.yyyy  HH:mm').format(s.scannedAt!) : 'Unknown',
+                leading : const Icon(Icons.history),        // thumbnail removed
+                title   : Text(
+                  s.scannedAt != null
+                      ? DateFormat('dd.MM.yyyy  HH:mm').format(s.scannedAt!)
+                      : 'Unknown',
                   style: const TextStyle(fontWeight: FontWeight.bold),
                 ),
                 subtitle: Text(s.verdict),
                 trailing: const Icon(Icons.chevron_right),
-                onTap: () => _open(s),
+                onTap   : () => _open(s),
               );
             },
           );
@@ -139,13 +137,13 @@ class _Scan {
   final String id;
   final String verdict;
   final DateTime? scannedAt;
-  final String? imageUrl;
-  const _Scan({required this.id, required this.verdict, this.scannedAt, this.imageUrl});
+  const _Scan({required this.id, required this.verdict, this.scannedAt});
 
   factory _Scan.fromJson(Map<String, dynamic> j) => _Scan(
-        id: j['scan_id'] as String,
-        verdict: j['final_verdict'] as String? ?? '',
-        scannedAt: j['scanned_at'] != null ? DateTime.parse(j['scanned_at']) : null,
-        imageUrl: j['s3_image_url'] as String? ?? j['image_url'] as String?,
+        id        : j['scan_id']       as String,
+        verdict   : j['final_verdict'] as String? ?? '',
+        scannedAt : j['scanned_at'] != null
+            ? DateTime.parse(j['scanned_at'])
+            : null,
       );
 }

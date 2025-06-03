@@ -20,13 +20,39 @@ class _MainPageState extends State<MainPage> {
   @override
   void initState() {
     super.initState();
-    _prefs.isSet().then((v) {
-      if (!v && mounted) {
+
+    // ask for dietary restrictions (original behaviour)
+    _prefs.isSet().then((dietSet) {
+      if (!dietSet && mounted) {
         Navigator.push(
           context,
-          MaterialPageRoute(
-              builder: (_) => const DietaryPreferencesScreen()),
+          MaterialPageRoute(builder: (_) => const DietaryPreferencesScreen()),
         );
+      }
+    });
+
+    // ask for analysis method if still unset
+    _prefs.isMethodSet().then((mSet) {
+      if (!mSet && mounted) {
+        showDialog<String>(
+          context: context,
+          barrierDismissible: false,
+          builder: (_) => SimpleDialog(
+            title: const Text('Choose analysis method'),
+            children: [
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(context, 'rule'),
+                child: const Text('Rule-based'),
+              ),
+              SimpleDialogOption(
+                onPressed: () => Navigator.pop(context, 'llm'),
+                child: const Text('LLM-based'),
+              ),
+            ],
+          ),
+        ).then((sel) {
+          if (sel != null) _prefs.setMethod(sel);
+        });
       }
     });
   }
