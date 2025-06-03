@@ -6,10 +6,8 @@ import 'package:intl/intl.dart';
 
 import '../config.dart';
 import '../services/auth_service.dart';
-import '../services/prefs_service.dart';
 import 'result_page.dart';
 
-/// Lists previous scans for the logged-in user (GET /scans).
 class HistoryPage extends StatefulWidget {
   const HistoryPage({super.key});
 
@@ -72,7 +70,6 @@ class _HistoryPageState extends State<HistoryPage> {
       }
     }
 
-    // ⬇️  use *server-side* restrictions stored with this scan
     final restrictions = List<String>.from(
       detail['restrictions'] ?? detail['restriction_ids'] ?? const [],
     );
