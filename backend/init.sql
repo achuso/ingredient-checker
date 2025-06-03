@@ -1,10 +1,12 @@
+
+
 -- UUID generation
 CREATE EXTENSION IF NOT EXISTS pgcrypto;
 
 DO $$
 BEGIN
     IF NOT EXISTS (SELECT 1 FROM pg_type WHERE typname = 'scan_verdict') THEN
-        CREATE TYPE scan_verdict AS ENUM ('safe', 'potentially unsafe', 'unsafe');
+        CREATE TYPE scan_verdict AS ENUM ('safe', 'maybe unsafe', 'definitely unsafe');
     END IF;
 END$$;
 

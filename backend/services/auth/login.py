@@ -19,6 +19,6 @@ async def login_user(email: str, password: str):
         if not bcrypt.checkpw(peppered, row["password_hash"].encode()):
             raise HTTPException(status_code=401, detail="Invalid credentials.")
 
-        return {"access_token": create_access_token({"user_id": user_id})}
+        return {"access_token": create_access_token({"sub": user_id})}
     finally:
         await db.close()
