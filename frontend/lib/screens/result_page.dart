@@ -1,4 +1,5 @@
 import 'package:flutter/material.dart';
+import 'package:share_plus/share_plus.dart';
 
 class ResultPage extends StatelessWidget {
   const ResultPage({
@@ -8,84 +9,90 @@ class ResultPage extends StatelessWidget {
     required this.traces,
   });
 
-  final String verdict; // safe | definitely unsafe | maybe unsafe | unsafe traces
+  final String verdict;
   final Map<String, String> ingredients;
   final Map<String, String> traces;
 
-  Color _bannerColor() {
-    if (verdict.contains('definitely')) return Colors.red;
-    if (verdict.contains('maybe'))       return Colors.yellow.shade700;
-    if (verdict.contains('safe') && verdict.contains('traces')) return Colors.orange;
+  Color _colorFor(String v) {
+    final t = v.toLowerCase();
+    if (t.contains('definitely') || t.contains('unsafe')) return Colors.red;
+    if (t.contains('maybe')) return Colors.orange;
     return Colors.green;
   }
 
-  Color _chipColor(String s) {
-    if (s.contains('definitely')) return Colors.red;
-    if (s.contains('maybe'))       return Colors.yellow.shade700;
-    return Colors.green;
+  String _shareText() {
+    final buf = StringBuffer()
+      ..writeln('Scan result')
+      ..writeln('Verdict: $verdict')
+      ..writeln('');
+    if (ingredients.isNotEmpty) {
+      buf.writeln('Ingredients:');
+      ingredients.forEach((k, v) => buf.writeln('- $k → $v'));
+    }
+    if (traces.isNotEmpty) {
+      buf.writeln('\nTraces:');
+      traces.forEach((k, v) => buf.writeln('- $k → $v'));
+    }
+    return buf.toString();
   }
 
-  Widget _list(Map<String, String> m) => Column(
-        children: m.entries
-            .map((e) => Container(
-                  margin: const EdgeInsets.symmetric(vertical: 4),
-                  decoration: BoxDecoration(
-                    border: Border.all(color: _chipColor(e.value), width: 2),
-                    borderRadius: BorderRadius.circular(12),
-                  ),
-                  child: ListTile(
-                    title: Text(e.key),
-                    trailing: Text(
-                      e.value.toUpperCase(),
-                      style: TextStyle(
-                          color: _chipColor(e.value),
-                          fontWeight: FontWeight.bold),
-                    ),
-                  ),
-                ))
-            .toList(),
-      );
+  List<Widget> _rows(Map<String, String> map) => map.entries
+      .map((e) => Card(
+            margin: const EdgeInsets.symmetric(vertical: 4),
+            shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(12)),
+            child: ListTile(
+              title: Text(e.key),
+              trailing: Text(
+                e.value.toUpperCase(),
+                style: TextStyle(
+                  fontWeight: FontWeight.bold,
+                  color: _colorFor(e.value),
+                ),
+              ),
+            ),
+          ))
+      .toList();
 
   @override
-  Widget build(BuildContext context) => Scaffold(
-        appBar: AppBar(title: const Text('Scan result')),
-        body: ListView(
-          padding: const EdgeInsets.all(16),
+  Widget build(BuildContext context) {
+    return Scaffold(
+      appBar: AppBar(
+        title: const Text('Scan result'),
+        actions: [
+          IconButton(
+            icon: const Icon(Icons.share),
+            onPressed: () => Share.share(_shareText()),
+          ),
+        ],
+      ),
+      body: Padding(
+        padding: const EdgeInsets.all(16),
+        child: ListView(
           children: [
             Center(
               child: Text(
                 verdict.toUpperCase(),
-                style: TextStyle(
-                  fontSize: 28,
-                  fontWeight: FontWeight.w700,
-                  color: _bannerColor(),
-                ),
+                style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                      color: _colorFor(verdict),
+                      fontWeight: FontWeight.bold,
+                    ),
               ),
             ),
-            if (verdict == 'unsafe traces')
-              const Padding(
-                padding: EdgeInsets.only(top: 8),
-                child: Text(
-                  'Product itself is safe but may contain traces of unsafe ingredients.',
-                  textAlign: TextAlign.center,
-                  style: TextStyle(color: Colors.orange),
-                ),
-              ),
             const SizedBox(height: 24),
             if (ingredients.isNotEmpty) ...[
-              const Text('INGREDIENTS',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('INGREDIENTS', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              _list(ingredients),
+              ..._rows(ingredients),
             ],
             if (traces.isNotEmpty) ...[
               const SizedBox(height: 24),
-              const Text('TRACES',
-                  style: TextStyle(fontWeight: FontWeight.bold)),
+              const Text('TRACES', style: TextStyle(fontWeight: FontWeight.bold)),
               const SizedBox(height: 8),
-              _list(traces),
+              ..._rows(traces),
             ],
           ],
         ),
-      );
+      ),
+    );
+  }
 }

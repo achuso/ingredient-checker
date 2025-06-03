@@ -7,6 +7,7 @@ import 'package:http/http.dart' as http;
 
 import '../config.dart';
 import '../services/prefs_service.dart';
+import '../services/auth_service.dart';          // ← NEW
 import 'result_page.dart';
 
 class ScanPage extends StatefulWidget {
@@ -18,14 +19,18 @@ class ScanPage extends StatefulWidget {
 
 class _ScanPageState extends State<ScanPage> {
   final _prefs = PrefsService();
-  List<String> _restrictions = [];
+  final _auth  = AuthService();                 // ← NEW
+
   File? _selected;
   bool _busy = false;
+  List<String> _restrictions = [];
+  String _method = 'rule';                      // "rule" | "llm"
 
   @override
   void initState() {
     super.initState();
     _prefs.getRestrictions().then((v) => setState(() => _restrictions = v));
+    _prefs.getMethod().then((v) => setState(() => _method = v));
   }
 
   Future<void> _pick(ImageSource src) async {
@@ -33,12 +38,9 @@ class _ScanPageState extends State<ScanPage> {
     if (f != null) setState(() => _selected = File(f.path));
   }
 
-  /* ---------- safe helpers ---------- */
-  String _statusOf(dynamic v) {
-    if (v is String) return v;
-    if (v is Map && v['status'] is String) return v['status'];
-    return 'unknown';
-  }
+  /* -------------------- utilities -------------------- */
+  String _statusOf(dynamic v) =>
+      v is String ? v : (v is Map && v['status'] is String ? v['status'] : 'unknown');
 
   String _pretty(String raw) => switch (raw) {
         'unsafe'  => 'definitely unsafe',
@@ -48,46 +50,48 @@ class _ScanPageState extends State<ScanPage> {
         _         => raw
       };
 
-  Map<String, String> _cast(dynamic node) {
-    if (node is Map) {
-      return {
-        for (final e in node.entries)
-          e.key.toString(): _pretty(_statusOf(e.value))
-      };
-    }
-    return {};
-  }
+  Map<String, String> _cast(dynamic node) => node is Map
+      ? {for (final e in node.entries) e.key as String: _statusOf(e.value)}
+      : {};
 
-  Future<void> _upload() async {
+  /* -------------------- analyze -------------------- */
+  Future<void> _analyze() async {
     if (_selected == null) return;
     setState(() => _busy = true);
 
     try {
+      final token = await _auth.readToken();           // ← NEW
+      if (token == null) {
+        throw Exception('Not authenticated. Please log in again.');
+      }
+
       final img64 = base64Encode(await _selected!.readAsBytes());
-      final up = await http.post(Uri.parse('$apiBaseUrl/analyze/upload'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({'image_base64': img64}));
-      if (up.statusCode != 200) throw Exception('Upload failed');
-      final s3 = jsonDecode(up.body)['s3_key'];
 
-      final proc = await http.post(Uri.parse('$apiBaseUrl/analyze/process'),
-          headers: {'Content-Type': 'application/json'},
-          body: jsonEncode({
-            's3_key': s3,
-            'restriction':
-                _restrictions.length == 1 ? _restrictions.first : _restrictions
-          }));
-      if (proc.statusCode != 200) throw Exception('Process failed');
-      if (!mounted) return;
-      setState(() => _busy = false);
+      final res = await http.post(
+        Uri.parse('$apiBaseUrl/analyze/process'),      // adjust if your path differs
+        headers: {
+          'Content-Type': 'application/json',
+          'Authorization': 'Bearer $token',           // ← NEW
+        },
+        body: jsonEncode({
+          'image_base64': img64,
+          'restriction_ids': _restrictions,
+          'method': _method,                           // "rule" | "llm"
+        }),
+      );
 
-      final json = jsonDecode(proc.body) as Map<String, dynamic>;
-      final verdictRaw = _statusOf(json['verdict']);
-      final cls = json['classified'] ?? {};
-      final ingredients = _cast((cls as Map<String, dynamic>)['ingredients']);
-      final traces = _cast(cls['traces']);
+      if (res.statusCode != 200) {
+        throw Exception('Upload failed (HTTP ${res.statusCode})');
+      }
 
-      final verdict = verdictRaw != 'unknown'
+      final json = jsonDecode(res.body) as Map<String, dynamic>;
+
+      final verdictRaw   = _statusOf(json['final_verdict']);
+      final cls          = json['classified'] ?? {};
+      final ingredients  = _cast((cls as Map<String, dynamic>)['ingredients']);
+      final traces       = _cast(cls['traces']);
+
+      final verdict = verdictRaw.isNotEmpty
           ? _pretty(verdictRaw)
           : ingredients.values.any((v) => v.contains('definitely'))
               ? 'definitely unsafe'
@@ -97,23 +101,30 @@ class _ScanPageState extends State<ScanPage> {
                       ? 'unsafe traces'
                       : 'safe';
 
+      if (!mounted) return;
+      setState(() => _busy = false);
+
       Navigator.push(
-          context,
-          MaterialPageRoute(
-              builder: (_) => ResultPage(
-                  verdict: verdict,
-                  ingredients: ingredients,
-                  traces: traces)));
+        context,
+        MaterialPageRoute(
+          builder: (_) => ResultPage(
+            verdict: verdict,
+            ingredients: ingredients,
+            traces: traces,
+          ),
+        ),
+      );
     } catch (e) {
       if (mounted) {
         ScaffoldMessenger.of(context).showSnackBar(
-            SnackBar(content: Text(e.toString()), backgroundColor: Colors.red));
+          SnackBar(content: Text(e.toString()), backgroundColor: Colors.red),
+        );
+        setState(() => _busy = false);
       }
-      setState(() => _busy = false);
     }
   }
 
-  /* ---------- UI helpers ---------- */
+  /* ---------------------- UI ---------------------- */
   Widget _btn(String label, IconData icon, VoidCallback tap) {
     final primary = Theme.of(context).colorScheme.primary;
     return ElevatedButton.icon(
@@ -124,8 +135,7 @@ class _ScanPageState extends State<ScanPage> {
         backgroundColor: primary,
         foregroundColor: Colors.white,
         padding: const EdgeInsets.symmetric(horizontal: 24, vertical: 14),
-        shape:
-            RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
+        shape: RoundedRectangleBorder(borderRadius: BorderRadius.circular(14)),
       ),
     );
   }
@@ -139,31 +149,31 @@ class _ScanPageState extends State<ScanPage> {
         child: SingleChildScrollView(
           padding: const EdgeInsets.symmetric(horizontal: 32),
           child: Column(
+            mainAxisAlignment: MainAxisAlignment.center,
             children: [
-              Icon(Icons.camera_alt_outlined, size: 120, color: primary),
-              const SizedBox(height: 16),
+              Icon(Icons.camera_alt_outlined,
+                  size: 120, color: primary.withOpacity(0.7)),
+              const SizedBox(height: 24),
               const Text('Snap or pick a product label',
-                  textAlign: TextAlign.center,
-                  style:
-                      TextStyle(fontSize: 20, fontWeight: FontWeight.w600)),
-              const SizedBox(height: 28),
+                  style: TextStyle(fontSize: 18)),
+              const SizedBox(height: 24),
               Row(
-                mainAxisAlignment: MainAxisAlignment.center,
+                mainAxisAlignment: MainAxisAlignment.spaceEvenly,
                 children: [
-                  _btn('Camera', Icons.camera_alt,
-                      () => _pick(ImageSource.camera)),
-                  const SizedBox(width: 18),
-                  _btn('Gallery', Icons.photo,
+                  _btn('Camera', Icons.camera, () => _pick(ImageSource.camera)),
+                  _btn('Gallery', Icons.photo_library,
                       () => _pick(ImageSource.gallery)),
                 ],
               ),
               if (_selected != null) ...[
-                const SizedBox(height: 28),
+                const SizedBox(height: 32),
                 ClipRRect(
-                    borderRadius: BorderRadius.circular(12),
-                    child: Image.file(_selected!, height: 220)),
+                  borderRadius: BorderRadius.circular(12),
+                  child: Image.file(_selected!,
+                      width: 280, fit: BoxFit.cover),
+                ),
                 const SizedBox(height: 24),
-                _btn('Upload & analyze', Icons.cloud_upload, _upload),
+                _btn('Upload & analyze', Icons.cloud_upload, _analyze),
               ],
               if (_busy) ...[
                 const SizedBox(height: 32),
