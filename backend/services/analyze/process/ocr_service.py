@@ -21,7 +21,7 @@ class OCRService:
         self.textract = _textract()
         self.s3 = boto3.client("s3")
 
-    # ─────────── helpers ───────────
+    # helpers
     def _download_image_bytes(self, key: str) -> bytes:
         obj = self.s3.get_object(Bucket=self.bucket, Key=key)
         return obj["Body"].read()
@@ -39,7 +39,7 @@ class OCRService:
         resp = self.textract.detect_document_text(Document={"Bytes": img_bytes})
         return [b["Text"] for b in resp.get("Blocks", []) if b["BlockType"] == "LINE"]
 
-    # ─────────── public API ───────────
+    # public API
     def extract_text(self, s3_key: str) -> str:
         try:
             original = self._download_image_bytes(s3_key)

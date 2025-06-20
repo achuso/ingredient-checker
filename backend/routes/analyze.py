@@ -25,7 +25,7 @@ _rules = ClassificationService()
 _llm = LLMService()
 
 
-# ──────────────────────────  Pydantic  ──────────────────────────
+#  Pydantic 
 class AnalyzeRequest(BaseModel):
     image_base64: str
     restriction_ids: List[str]
@@ -34,7 +34,7 @@ class AnalyzeRequest(BaseModel):
     )
 
 
-# ───────────────────── helpers & normalisation  ─────────────────────
+# helpers & normalisation
 def _normalise(raw: Any) -> List[Dict[str, str]]:
     """
     Make *anything* (dict, list, plain string) look like:
@@ -50,7 +50,7 @@ def _normalise(raw: Any) -> List[Dict[str, str]]:
             out.extend(_normalise(item))
         return out
 
-    # dict mapping ingredient → status
+    # dict mapping ingredient to status
     if isinstance(raw, dict) and all(isinstance(k, str) for k in raw):
         for k, v in raw.items():
             status = (
@@ -100,14 +100,14 @@ def _compute_final_verdict(
     return "unknown"
 
 
-# ─────────────────────────────  endpoint  ────────────────────────────
+# endpoint
 @router.post("/process")
 async def process_scan(
     data: AnalyzeRequest,
     db=Depends(get_db),
     current_user: UserModel = Depends(get_current_user),
 ):
-    # 1) upload to S3 ---------------------------------------------------
+    # 1) upload to S3
     try:
         s3_key = await run_in_threadpool(
             _upload.upload_base64_image, data.image_base64
@@ -116,7 +116,7 @@ async def process_scan(
         logger.error("upload failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to upload image.")
 
-    # 2) classify -------------------------------------------------------
+    # 2) classify
     restrictions = data.restriction_ids or []
 
     try:
@@ -146,7 +146,7 @@ async def process_scan(
         logger.error("classification failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to classify image.")
 
-    # 3) compute verdict & DB persist ----------------------------------
+    # 3) compute verdict & DB persist
     verdict = _compute_final_verdict(cls_ing, cls_tr)
 
     merged = (
@@ -180,7 +180,7 @@ async def process_scan(
         logger.error("DB persistence failed: %s", e, exc_info=True)
         raise HTTPException(status_code=500, detail="Failed to save scan.")
 
-    # 4) respond in the same shape the frontend already consumes -------
+    # 4) respond in the same shape the frontend already consumes
     classified_payload = {
         "ingredients": {
             c["ingredient"]: {"status": c["status"]} for c in cls_ing

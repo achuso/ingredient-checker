@@ -1,7 +1,3 @@
-"""services/scans/scans.py – unified persistence helpers (async/asyncpg)
-
-Adds JOIN to return human-readable dietary-restriction *names* alongside UUIDs.
-"""
 from __future__ import annotations
 
 import datetime as _dt
@@ -13,18 +9,17 @@ from fastapi import HTTPException
 
 from services.db_conn import Database
 
-# ─────────── Table / column aliases ───────────
+# Table / column aliases
 INGR_TABLE       = "scan_ingredients"
 INGR_COL_ING     = "ingredient_name"
 INGR_COL_STATUS  = "verdict"
 
-DIET_TABLE       = "scan_dietary_restrictions"   # link (scan_id ↔ restriction_id)
-DIET_REF_TABLE   = "dietary_restrictions"        # master list: restriction_id + name
+DIET_TABLE       = "scan_dietary_restrictions"
+DIET_REF_TABLE   = "dietary_restrictions"
 DIET_COL         = "restriction_id"
 
 UUID_RE = re.compile(r"^[0-9a-fA-F-]{32,36}$")
 
-# ──────────────────────────────────────────────
 async def _lookup_restriction_uuid(db: Database, code_or_uuid: str) -> str | None:
     """Return the UUID of a dietary restriction.
 
@@ -40,7 +35,6 @@ async def _lookup_restriction_uuid(db: Database, code_or_uuid: str) -> str | Non
     )
     return row[DIET_COL] if row else None
 
-# ──────────────────────────────────────────────
 async def persist_scan(
     *,
     user_id: str,
@@ -56,7 +50,7 @@ async def persist_scan(
     db = Database()
     await db.connect()
     try:
-        # 1) main row ---------------------------------------------------
+        # 1) main row
         row = await db.fetchrow(
             """
             INSERT INTO scans (scan_id, user_id, s3_image_url, final_verdict, scanned_at)
@@ -70,7 +64,7 @@ async def persist_scan(
             now,
         )
 
-        # 2) diet links -------------------------------------------------
+        # 2) diet links
         if restriction_ids:
             for rid in restriction_ids:
                 uuid_val = await _lookup_restriction_uuid(db, str(rid))
@@ -83,7 +77,7 @@ async def persist_scan(
                     uuid_val,
                 )
 
-        # 3) ingredient rows -------------------------------------------
+        # 3) ingredient rows
         for item in ingredients:
             await db.execute(
                 f"""
@@ -100,7 +94,7 @@ async def persist_scan(
     finally:
         await db.close()
 
-# ──────────────────────────────────────────────
+
 async def get_scan_history(user_id: str) -> List[Dict[str, Any]]:
     db = Database()
     await db.connect()
@@ -118,7 +112,7 @@ async def get_scan_history(user_id: str) -> List[Dict[str, Any]]:
     finally:
         await db.close()
 
-# ──────────────────────────────────────────────
+
 async def get_scan_details(user_id: str, scan_id: str) -> Dict[str, Any]:
     """Return one scan incl. ingredient list and BOTH restriction ids + names."""
     db = Database()
@@ -148,7 +142,7 @@ async def get_scan_details(user_id: str, scan_id: str) -> Dict[str, Any]:
             scan_id,
         )
 
-        # ─── diet look-up: join to master for readable names ───
+        # diet look-up: join to master for readable names
         diet_rows = await db.fetch(
             f"""
             SELECT dr.{DIET_COL} AS id, dr.name
@@ -163,7 +157,7 @@ async def get_scan_details(user_id: str, scan_id: str) -> Dict[str, Any]:
             **dict(scan),
             "ingredients": [dict(r) for r in ing_rows],
             "restriction_ids": [r["id"] for r in diet_rows],
-            "restrictions": [r["name"] for r in diet_rows],  # ← NEW human names
+            "restrictions": [r["name"] for r in diet_rows],
         }
     finally:
         await db.close()

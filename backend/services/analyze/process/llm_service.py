@@ -11,18 +11,16 @@ logger = logging.getLogger(__name__)
 # ─────────── env / constants ───────────
 _REGION      = os.getenv("AWS_REGION", "eu-central-1")
 _MODEL_ID    = os.getenv("BEDROCK_MODEL_ID", "anthropic.claude-3-haiku-20240328-v1:0")
-_TEMPERATURE = float(os.getenv("BEDROCK_TEMPERATURE", "0"))      # 0 ⇒ deterministic
+_TEMPERATURE = float(os.getenv("BEDROCK_TEMPERATURE", "0"))      # 0 to be more deterministic
 _MAX_TOKENS  = int(os.getenv("BEDROCK_MAX_TOKENS", "1024"))
 _ANTHROPIC_VERSION = "bedrock-2023-05-31"
 
 bedrock_rt = boto3.client("bedrock-runtime", region_name=_REGION)
 
-# regex to capture:  JSON:{ … }   (DOTALL for multi-line)
 JSON_RE = re.compile(r'JSON\s*:\s*(\{.*\})', re.DOTALL)
 
 
 class LLMService:
-    """Thin client around Claude-3 Haiku on Bedrock, tailored for ingredient labelling."""
     def __init__(self, model_id: str | None = None):
         self.model_id = model_id or _MODEL_ID
 
@@ -46,7 +44,7 @@ class LLMService:
         prompt = self._prompt_from_lists(ingredients, traces, restrictions)
         return self._invoke(prompt)
 
-    # ─── Bedrock call & JSON extraction ───────────────────────────
+    # Bedrock call & JSON extraction
     def _invoke(self, prompt: str) -> Dict[str, Any]:
         body = {
             "anthropic_version": _ANTHROPIC_VERSION,
@@ -82,7 +80,7 @@ class LLMService:
             logger.error("Bad JSON from LLM: %s\nBlob:\n%s", err, m.group(1))
             raise
 
-    # ─── prompt builders ───────────────────────────────────────────
+    # prompt builders
     @staticmethod
     def _prompt_from_raw_text(text: str, restrictions: list[str]) -> str:
         active = ", ".join(restrictions)
