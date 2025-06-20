@@ -3,7 +3,7 @@ import json, re, unicodedata
 from pathlib import Path
 from typing import Iterable, List, Dict
 
-_RULES_FILE = Path(__file__).with_name("rules.json")   # …or inject via __init__
+_RULES_FILE = Path(__file__).with_name("rules.json")
 
 
 def _normalize(text: str) -> str:
